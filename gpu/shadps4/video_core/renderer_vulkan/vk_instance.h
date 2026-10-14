@@ -100,6 +100,11 @@ public:
         return side_queue_family_index;
     }
 
+    /// Linux fork: the queue sparse binds go to (the graphics queue when its family has them).
+    vk::Queue GetSparseQueue() const {
+        return sparse_queue;
+    }
+
     vk::Queue GetPresentQueue() const {
         return present_queue;
     }
@@ -549,6 +554,8 @@ private:
     vk::Queue present_queue;
     vk::Queue side_queue;
     u32 side_queue_family_index{};
+    vk::Queue sparse_queue;
+    u32 sparse_queue_family_index{};
     vk::Queue graphics_queue;
     std::vector<vk::PhysicalDevice> physical_devices;
     std::vector<std::string> available_extensions;

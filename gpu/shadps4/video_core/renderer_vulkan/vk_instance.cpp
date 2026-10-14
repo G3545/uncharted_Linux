@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdio>
 #include <cstdlib>
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
@@ -435,20 +436,58 @@ bool Instance::CreateDevice() {
         }
     }
     const bool side_family = side_queue_family_index != queue_family_index;
+    // Linux fork (from GOW3 PC #252): sparse binds need a queue of a family with sparse binding.
+    // Newer RADV (Steam Deck) has it only on a family of its own, not on the graphics family.
+    sparse_queue_family_index = queue_family_index;
+    if (!(family_properties[queue_family_index].queueFlags & vk::QueueFlagBits::eSparseBinding)) {
+        // A family of its own first, so the side queue keeps its copy engine.
+        for (const bool allow_side : {false, true}) {
+            for (u32 i = 0; i < family_properties.size(); ++i) {
+                if (family_properties[i].queueCount &&
+                    (family_properties[i].queueFlags & vk::QueueFlagBits::eSparseBinding) &&
+                    (allow_side || i != side_queue_family_index)) {
+                    sparse_queue_family_index = i;
+                    break;
+                }
+            }
+            if (sparse_queue_family_index != queue_family_index) {
+                break;
+            }
+        }
+        if (sparse_queue_family_index == queue_family_index) {
+            LOG_WARNING(Render_Vulkan, "No queue family has sparse binding");
+        }
+    }
+    const bool sparse_family = sparse_queue_family_index != queue_family_index;
+    const bool sparse_on_side = sparse_family && sparse_queue_family_index == side_queue_family_index;
     const u32 graphics_queues =
         side_family ? 1u : std::min<u32>(2u, family_properties[queue_family_index].queueCount);
-    const std::array queue_infos = {
+    // Sparse binds on the side family take its second queue; with only one, the sparse binds get
+    // it and there is no side queue (one VkQueue is never used by two threads).
+    const u32 side_queues =
+        sparse_on_side ? std::min<u32>(2u, family_properties[side_queue_family_index].queueCount)
+                       : 1u;
+    std::vector<vk::DeviceQueueCreateInfo> queue_infos = {
         vk::DeviceQueueCreateInfo{
             .queueFamilyIndex = queue_family_index,
             .queueCount = graphics_queues,
             .pQueuePriorities = queue_priorities.data(),
         },
-        vk::DeviceQueueCreateInfo{
+    };
+    if (side_family) {
+        queue_infos.push_back({
             .queueFamilyIndex = side_queue_family_index,
+            .queueCount = side_queues,
+            .pQueuePriorities = queue_priorities.data(),
+        });
+    }
+    if (sparse_family && !sparse_on_side) {
+        queue_infos.push_back({
+            .queueFamilyIndex = sparse_queue_family_index,
             .queueCount = 1,
             .pQueuePriorities = queue_priorities.data(),
-        },
-    };
+        });
+    }
 
     const auto vk11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
     vk12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
@@ -467,7 +506,7 @@ bool Instance::CreateDevice() {
     }
     vk::StructureChain device_chain = {
         vk::DeviceCreateInfo{
-            .queueCreateInfoCount = side_family ? 2u : 1u,
+            .queueCreateInfoCount = static_cast<u32>(queue_infos.size()),
             .pQueueCreateInfos = queue_infos.data(),
             .enabledExtensionCount = static_cast<u32>(enabled_extensions.size()),
             .ppEnabledExtensionNames = enabled_extensions.data(),
@@ -703,10 +742,23 @@ bool Instance::CreateDevice() {
     graphics_queue = device->getQueue(queue_family_index, 0);
     present_queue = device->getQueue(queue_family_index, 0);
     g_crash_queue = graphics_queue;
-    if (side_queue_family_index != queue_family_index) {
+    sparse_queue = graphics_queue;
+    if (sparse_on_side) {
+        sparse_queue = device->getQueue(sparse_queue_family_index, side_queues - 1);
+        if (side_queues > 1) {
+            side_queue = device->getQueue(side_queue_family_index, 0);
+        }
+        std::printf("Vulkan: sparse binds on queue family %u (%s)\n", sparse_queue_family_index,
+                    side_queues > 1 ? "its second queue" : "no side queue");
+    } else if (side_queue_family_index != queue_family_index) {
         side_queue = device->getQueue(side_queue_family_index, 0);
     } else if (physical_device.getQueueFamilyProperties()[queue_family_index].queueCount > 1) {
         side_queue = device->getQueue(queue_family_index, 1);
+    }
+
+    if (sparse_family && !sparse_on_side) {
+        sparse_queue = device->getQueue(sparse_queue_family_index, 0);
+        std::printf("Vulkan: sparse binds on queue family %u\n", sparse_queue_family_index);
     }
 
     if (calibrated_timestamps) {
