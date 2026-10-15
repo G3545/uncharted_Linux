@@ -66,8 +66,7 @@ FSR 4 assets from [FireBurn/Q2RTX](https://github.com/FireBurn/Q2RTX), the
 [MSYS2](https://www.msys2.org) / [LLVM](https://llvm.org), [PyInstaller](https://pyinstaller.org),
 [Pillow](https://python-pillow.org) and the Cinzel font (SIL Open Font License).
 
-NVIDIA, GeForce RTX and DLSS are trademarks of NVIDIA Corporation. The default covers and the
-icon are original artwork; no official art is included.
+NVIDIA, GeForce RTX and DLSS are trademarks of NVIDIA Corporation.
 
 ## License
 
