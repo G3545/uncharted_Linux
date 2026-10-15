@@ -13,12 +13,15 @@ The in-game "Apply and restart" runs this script again through BB_RESTART_COMMAN
 import ctypes
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
 PORT = Path(__file__).resolve().parent
 EXECUTABLES = {'u1': 'eboot.bin', 'u2': 'big2-ps4_Shipping.elf', 'u3': 'big3-ps4_Shipping.elf'}
 LOADEXEC_EXIT = 101  # runtime_services.c: the game asked for another executable
+WINDOWS = sys.platform == 'win32'
+PROBE = 'bb-probe.exe' if WINDOWS else 'bb-probe'
 
 
 def fail(message):
@@ -27,6 +30,18 @@ def fail(message):
 
 
 def wait_for(pid):
+    if not WINDOWS:
+        # Linux: an in-game restart execs this script in the game's own process.
+        if pid == os.getpid():
+            return
+        import time
+        for _ in range(300):
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return
+            time.sleep(0.1)
+        return
     kernel32 = ctypes.windll.kernel32
     SYNCHRONIZE = 0x00100000
     handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
@@ -37,6 +52,8 @@ def wait_for(pid):
 
 def no_console():
     """Started without a console (the launcher): console programs must not open their own."""
+    if not WINDOWS:
+        return 0
     return 0 if ctypes.windll.kernel32.GetConsoleWindow() else subprocess.CREATE_NO_WINDOW
 
 
@@ -99,11 +116,21 @@ def main():
     if not env.get('BB_FSR411_DIR') and not (PORT / 'fsr4_411').is_dir() and (data / 'fsr4_411').is_dir():
         env['BB_FSR411_DIR'] = str(data / 'fsr4_411')
 
-    probe = Path(env['BB_PROBE']) if env.get('BB_PROBE') else find_executable('bb-probe.exe')
+    probe = Path(env['BB_PROBE']) if env.get('BB_PROBE') else find_executable(PROBE)
     if not probe or not probe.is_file():
-        fail('bb-probe.exe not found: build it with build.sh (MSYS2 CLANG64) or use a packaged build.')
+        fail(f'{PROBE} not found: build it with build.sh or use a packaged build.')
+    if not WINDOWS:
+        # Linux package: bundled libraries in bin/lib. A frozen launcher (PyInstaller) points
+        # LD_LIBRARY_PATH at its own libraries; the game gets the original value back.
+        original = env.pop('LD_LIBRARY_PATH_ORIG', None)
+        if getattr(sys, 'frozen', False):
+            env.pop('LD_LIBRARY_PATH', None)
+            if original:
+                env['LD_LIBRARY_PATH'] = original
+        if (probe.parent / 'lib').is_dir():
+            env['LD_LIBRARY_PATH'] = os.pathsep.join(filter(None, [str(probe.parent / 'lib'), env.get('LD_LIBRARY_PATH')]))
     # Development builds run from the MSYS2 tree: its CLANG64 DLLs (SDL3, FFmpeg, ...).
-    if not (probe.parent / 'SDL3.dll').is_file():
+    elif not (probe.parent / 'SDL3.dll').is_file():
         clang64 = Path(env.get('MSYS2_ROOT', r'C:\msys64')) / 'clang64' / 'bin'
         if clang64.is_dir():
             env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
@@ -130,7 +157,7 @@ def main():
         run_script('content_profile.py', game, '--out', out, '--sku', env.get('BB_CONTENT_SKU', 'full'))
         this = ['--run'] if getattr(sys, 'frozen', False) else [str(Path(__file__).resolve())]
         env['BB_EXE'] = exe
-        env['BB_RESTART_COMMAND'] = subprocess.list2cmdline([sys.executable, *this, '--after', str(os.getpid()), *args])
+        env['BB_RESTART_COMMAND'] = (subprocess.list2cmdline if WINDOWS else shlex.join)([sys.executable, *this, '--after', str(os.getpid()), *args])
         command = [str(probe), str(out / 'boot-linked.bin'), '--content-profile', str(out / 'content.bin'),
                    '--app0', str(game), '--user', str(user_dir), '--timeout', env.get('BB_TIMEOUT', '0')]
         if guest_argv:
