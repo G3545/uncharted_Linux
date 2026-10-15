@@ -1,12 +1,10 @@
 # Uncharted: The Nathan Drake Collection for Windows
 
-**Uncharted 1, 2 and 3 from the PS4 collection running natively on Windows 10 and 11, by [SuperMedo](https://github.com/Supermedo).** Mohammed Albarghouthi
+**Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).** Mohammed Albarghouthi
 
 Same idea as my [Bloodborne port](https://github.com/Supermedo/bloodborne_pc): the original PS4 game
 code runs directly on your PC and the graphics are translated to Vulkan. Unpack the zip, start
 `Uncharted.exe`, pick your game folder, choose a game and press **PLAY**.
-
-**[Download the latest version](https://github.com/Supermedo/uncharted_pc/releases/latest)** · **[Join the Discord](https://discord.gg/yTMG8c4Bqm)**
 
 > **No game files are included.** You need your own decrypted dump of the collection
 > (CUSA02343, CUSA02320, ...: the folder with eboot.bin, big2-ps4_Shipping.elf,
@@ -24,7 +22,6 @@ code runs directly on your PC and the graphics are translated to Vulkan. Unpack 
 
 ## Requirements
 
-- Windows 10 (1903 or later) or Windows 11, 64-bit.
 - A graphics card with Vulkan 1.3 and a current driver.
 - About 8 GB of free memory (RAM + page file).
 
@@ -41,11 +38,6 @@ code runs directly on your PC and the graphics are translated to Vulkan. Unpack 
   run). 0.3.1 holds the game at most one frame ahead, like on PS4. If you still see it, open an
   issue with your log.
 - Frame rates above 120 are experimental.
-
-## Building
-
-MSYS2 CLANG64 on Windows: `bash build.sh` builds `out\bb-probe.exe`, and
-`bash packaging/windows/package.sh` makes `dist\uncharted-windows` and the zip.
 
 ## Credits
 
