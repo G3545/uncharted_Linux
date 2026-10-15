@@ -1,4 +1,4 @@
-# Uncharted: The Nathan Drake Collection for Windows
+# Uncharted: The Nathan Drake Collection for Linux/Steam Deck
 
 **Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).** Mohammed Albarghouthi
 
