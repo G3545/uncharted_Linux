@@ -275,15 +275,14 @@ def apply_defaults(ns):
         ns['FRAME_RATES'].insert(0, ('30', '30 FPS (Steam Deck)'))
 
 
-def default_saves(settings, data_dir):
-    """An empty saves folder means <game folder>/Saves (kept beside the game, like a console's
-    save directory), unless the old default (<data>/user) already holds saves."""
-    if settings.get('user_dir') or not settings.get('game_dir'):
-        return
-    old = Path(data_dir) / 'user'
-    if any((old / name).exists() for name in ('savedata', 'Uncharted 1', 'Uncharted 2', 'Uncharted 3')):
-        return
-    settings['user_dir'] = str(Path(settings['game_dir']) / 'Saves')
+def saves_for(game_dir):
+    return str(Path(game_dir) / 'Saves') if game_dir else ''
+
+
+def default_saves(settings, data_dir=None):
+    """An empty saves folder means <game folder>/Saves."""
+    if not settings.get('user_dir') and settings.get('game_dir'):
+        settings['user_dir'] = saves_for(settings['game_dir'])
 
 
 def deck_environment(settings, env):
@@ -374,6 +373,7 @@ def launcher_class(base, ns):
     class LinuxLauncher(base):
         def build(self):
             super().build()
+            self.saves_autofill()
             # "Launching…" for every step of starting a game.
             configure = self.status.configure
 
@@ -464,6 +464,20 @@ def launcher_class(base, ns):
             self.ready = tk.Label(shell, text='', bg=SURFACE, fg=MUTED, font=self.font_ui_sm,
                                   wraplength=self.px(820), justify='left')
             self.ready.pack(anchor='w', pady=(0, self.px(16)))
+
+        def saves_autofill(self):
+            # Choosing a game folder fills in <folder>/Saves, unless the player chose a saves
+            # folder of their own (the field is empty or still holds the previous automatic one).
+            game, saves = self.var('game_dir'), self.var('user_dir')
+            self._auto_saves = saves_for(game.get())
+
+            def follow(*_args):
+                if saves.get() in ('', self._auto_saves):
+                    self._auto_saves = saves_for(game.get())
+                    saves.set(self._auto_saves)
+            game.trace_add('write', follow)
+            if not saves.get():
+                follow()
 
         def collect(self):
             for key, var in self.vars.items():
