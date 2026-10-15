@@ -1,25 +1,25 @@
 # Uncharted: The Nathan Drake Collection for Linux/Steam Deck
 
-**Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).
+Join the Discord: https://discord.gg/X2YhSJg6R2
 
-This fork builds SuperMedo's Windows port for Linux and the Steam Deck. It picks up new upstream
-versions automatically (see [Staying up to date](#staying-up-to-date)). Status: early, so expect
-problems.
+**Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).**
+
+**DISTRIBUTIONS TESTED: SteamOS 3.7, Fedora 44**
+
+This fork builds SuperMedo's Windows port for Linux and the Steam Deck.
+
+Status: Early, expect minor graphical issues and some crashes. Steam Deck running at stable 28-30fps currently.
 
 ## Install
-
-Terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh
 ```
 
-It puts `Uncharted-x86_64.AppImage` in `~/Applications` and adds **Uncharted** to the
-application menu and the desktop. The launcher updates itself: when a new release is out, it
-downloads it in the background and offers a restart. You can turn that off on the
-**Advanced** page. To remove it, run
+## Uninstall
+
 `curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh -s -- --uninstall`.
-Saves and settings live in `~/.local/share/uncharted-linux` and are kept either way.
+Saves and settings go to `~/.local/share/uncharted-linux` 
 
 Appimage:
 1. Download **[Uncharted-x86_64.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage)**.
@@ -37,9 +37,6 @@ game folder.
 **Your game files:** copy the dump folder to the Deck or PC, for example `~/Games/CUSA02343`.
 A microSD card works too (`/run/media/deck/<card>/...`).
 
-Suggested Steam Deck settings: Frame rate **60**, Anti-aliasing **Off** or **AMD FSR 3.1**,
-Frame generation **Off**.
-
 > **No game files are included.** You need your own decrypted dump of the collection
 > (CUSA02343, CUSA02320, ...: the folder with eboot.bin, big2-ps4_Shipping.elf,
 > big3-ps4_Shipping.elf, sce_sys, u1data, u2data and u3data).
@@ -48,11 +45,12 @@ Frame generation **Off**.
 ## Features
 
 - All three games from one launcher: Drake's Fortune, Among Thieves and Drake's Deception.
-- 60 FPS like on PS4, or 120 FPS (higher rates are experimental).
+- Steam Deck Mode: optimizes for Steam Deck and is automatically applied on SteamOS.
 - Anti-aliasing with TAA or AMD FSR 3.1. (NVIDIA DLSS and AMD FSR 4 are in the Windows version only.)
 - Frame generation: AMD FSR 3 (any GPU).
 - Keyboard, mouse and controller together, all remappable. Mouse look in U3.
-- Add to Steam (one entry per game) and desktop shortcuts from the launcher, and an update notice.
+- Each game can be added to Steam individually
+- 
 
 ## Requirements
 
@@ -92,19 +90,6 @@ python3 launcher/uncharted_launcher.py
 bash packaging/linux/package.sh    # optional: the AppImage and the tarball in dist/
 ```
 
-## Staying up to date
-
-- [`sync-upstream.yml`](.github/workflows/sync-upstream.yml) runs every six hours. You can also
-  start it from the Actions tab. It merges
-  [Supermedo/uncharted_pc](https://github.com/Supermedo/uncharted_pc) into `main`, and
-  [`build.yml`](.github/workflows/build.yml) then publishes a new release.
-- The branch `upstream` is an exact copy of SuperMedo's `main`.
-- This README is the fork's own: when upstream changes theirs, this one is kept.
-- If any other file conflicts, the workflow opens a pull request from `upstream` instead.
-  Resolve the conflicts there and merge it.
-- The Linux changes to upstream files are small and marked `Linux fork`. Most of the Linux code
-  is in its own files (`launcher/uncharted_linux.py`, `packaging/linux/`, `install.sh`,
-  `.github/`), so conflicts should be rare.
 
 ## Credits
 
