@@ -8,14 +8,6 @@ Join the Discord: https://discord.gg/X2YhSJg6R2
 
 Status: Early, expect minor graphical issues and some crashes. Steam Deck running at stable 28-30fps by using Steam Deck mode. 
 
-## Features
-
-- All three games from one launcher: Drake's Fortune, Among Thieves and Drake's Deception.
-- Anti-aliasing with TAA or AMD FSR 3.1. (NVIDIA DLSS and AMD FSR 4 are in the Windows version only.)
-- Frame generation: AMD FSR 3 (any GPU).
-- Keyboard, mouse and controller together, all remappable. Mouse look in U3.
-- Each game can be added to Steam individually
-
 ## Install
 
 ```sh
@@ -24,8 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main
 
 ## Uninstall
 
-`curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh -s -- --uninstall`.
-Saves and settings go to `~/.local/share/uncharted-linux` 
+`curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh -s -- --uninstall`
 
 ## Appimage
 1. Download **[Uncharted-x86_64.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage)**.
@@ -35,7 +26,7 @@ Saves and settings go to `~/.local/share/uncharted-linux`
 
 ## How to Play 
 
-You must have an unencryped extracted dump of the Uncharted: The Nathan Drake Collection (CUSA02320) v1.00.
+You must have an unencrypted extracted dump of the Uncharted: The Nathan Drake Collection (CUSA02320) v1.00.
 
 Point the launcher to this folder in the Game tab. By default, a new Saves folder will appear.
 
