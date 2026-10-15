@@ -8,6 +8,14 @@ Join the Discord: https://discord.gg/X2YhSJg6R2
 
 Status: Early, expect minor graphical issues and some crashes. Steam Deck running at stable 28-30fps by using Steam Deck mode. 
 
+## Features
+
+- All three games from one launcher: Drake's Fortune, Among Thieves and Drake's Deception.
+- Anti-aliasing with TAA or AMD FSR 3.1. (NVIDIA DLSS and AMD FSR 4 are in the Windows version only.)
+- Frame generation: AMD FSR 3 (any GPU).
+- Keyboard, mouse and controller together, all remappable. Mouse look in U3.
+- Each game can be added to Steam individually
+
 ## Install
 
 ```sh
@@ -38,18 +46,11 @@ Once your game folder has been specified, you're ready to play either by clickin
 > big3-ps4_Shipping.elf, sce_sys, u1data, u2data and u3data).
 > This project is not affiliated with Sony Interactive Entertainment or Naughty Dog.
 
-## Features
-
-- All three games from one launcher: Drake's Fortune, Among Thieves and Drake's Deception.
-- Anti-aliasing with TAA or AMD FSR 3.1. (NVIDIA DLSS and AMD FSR 4 are in the Windows version only.)
-- Frame generation: AMD FSR 3 (any GPU).
-- Keyboard, mouse and controller together, all remappable. Mouse look in U3.
-- Each game can be added to Steam individually
-
 ## Steam Deck
 
 - In the Display tab, a Steam Deck mode is auto-selected if you are on SteamOS. With this enabled, expect an average of 25-30fps with occasional dips during demanding segments.
 - It is recommended to set your FPS cap to 30fps on the Steam Deck power menu.
+
 
 ## Requirements
 
