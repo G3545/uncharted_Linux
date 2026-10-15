@@ -100,6 +100,7 @@ jobs:
             # main may have moved while the build ran (README edits): merge, keeping its README.
             if git merge --no-edit origin/upstream-merge || { git checkout --ours README.md && git add README.md && git commit --no-edit; }; then
               git push origin HEAD:main
+              git push origin --delete upstream-merge || true  # staging only; main has it now
               gh workflow run build.yml --ref main
               exit 0
             fi
