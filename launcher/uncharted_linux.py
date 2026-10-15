@@ -247,6 +247,39 @@ def icon_image(name, size, color, background):
     return image
 
 
+def refresh_icon(size, color, background, glow=0.0, glow_color=None):
+    """A refresh symbol (a circular arrow) as a PIL image; `glow` 0..1 adds a soft halo."""
+    import math
+    from PIL import Image, ImageDraw, ImageFilter
+
+    def rgb(value):
+        return tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+    scale = 4
+    n = size * scale
+    image = Image.new('RGB', (n, n), rgb(background))
+    if glow > 0:
+        halo = Image.new('L', (n, n), 0)
+        ImageDraw.Draw(halo).ellipse((n * 0.22, n * 0.22, n * 0.78, n * 0.78), fill=int(170 * glow))
+        halo = halo.filter(ImageFilter.GaussianBlur(n * 0.09))
+        image.paste(Image.new('RGB', (n, n), rgb(glow_color or color)), (0, 0), halo)
+    draw = ImageDraw.Draw(image)
+    pad, width = n * 0.1, max(2, int(n * 0.12))
+    box = (pad, pad, n - pad, n - pad)
+    draw.arc(box, start=50, end=330, fill=rgb(color), width=width)
+    # Arrowhead at the arc's end (330 degrees), pointing along the arc (clockwise in Tk's y-down).
+    cx = cy = n / 2
+    r = (n - 2 * pad) / 2 - width / 2
+    a = math.radians(330)
+    tip_x, tip_y = cx + r * math.cos(a), cy + r * math.sin(a)
+    head = n * 0.2
+    tangent = a + math.pi / 2
+    points = [(tip_x + head * math.cos(tangent), tip_y + head * math.sin(tangent)),
+              (tip_x + head * 0.9 * math.cos(a), tip_y + head * 0.9 * math.sin(a)),
+              (tip_x - head * 0.9 * math.cos(a), tip_y - head * 0.9 * math.sin(a))]
+    draw.polygon(points, fill=rgb(color))
+    return image.resize((size, size), Image.LANCZOS)
+
+
 def desktop_game_entry(launcher_file, key, name):
     """`name` (one game) in the application menu and on the desktop."""
     exe, options = launch_target(launcher_file)
@@ -382,15 +415,98 @@ def launcher_class(base, ns):
                     kw['text'] = _('Launching…')
                 return configure(**kw)
             self.status.configure = self.status.config = status
-            # The GitHub mark (this fork's repository) instead of the note in the sidebar.
+            self.build_corner()
+
+        def build_corner(self):
+            """Bottom of the sidebar: the GitHub mark (this fork's repository) and the update
+            button (grey: up to date, click to check; glowing: a new version, click to use it)."""
             from PIL import ImageTk
-            self._github = ImageTk.PhotoImage(icon_image('github', self.px(26), MUTED, ns['BG']))
-            self.side_note.configure(text='', image=self._github, cursor='hand2')
-            self.side_note.bind('<Button-1>', lambda _e: open_path(REPO_URL))
-            self.side_note.bind('<Enter>', lambda _e: self.side_note.configure(
-                image=self._github_hot) if hasattr(self, '_github_hot') else None)
-            self._github_hot = ImageTk.PhotoImage(icon_image('github', self.px(26), TEXT, ns['BG']))
-            self.side_note.bind('<Leave>', lambda _e: self.side_note.configure(image=self._github))
+            tk, bg, size = self.tk, ns['BG'], self.px(26)
+            self.side_note.pack_forget()
+            row = tk.Frame(self.side, bg=bg)
+            row.pack(anchor='w', padx=18, pady=(0, 18))
+            self.side_note = row  # update notices are packed above it
+
+            def icon(label, normal, hot, command, hint):
+                label.configure(image=normal, cursor='hand2')
+                label.bind('<Button-1>', lambda _e: command())
+                label.bind('<Enter>', lambda _e: (label.configure(image=hot()), self.corner_hint(hint())))
+                label.bind('<Leave>', lambda _e: (label.configure(image=normal() if callable(normal) else normal),
+                                                  self.corner_hint(None)))
+            self._github = ImageTk.PhotoImage(icon_image('github', size, MUTED, bg))
+            self._github_hot = ImageTk.PhotoImage(icon_image('github', size, TEXT, bg))
+            github = tk.Label(row, bg=bg, bd=0)
+            github.pack(side='left')
+            icon(github, self._github, lambda: self._github_hot, lambda: open_path(REPO_URL),
+                 lambda: _('This fork on GitHub'))
+            self._refresh_idle = ImageTk.PhotoImage(refresh_icon(size, MUTED, bg))
+            self._refresh_hot = ImageTk.PhotoImage(refresh_icon(size, TEXT, bg))
+            self._refresh_glow = [ImageTk.PhotoImage(refresh_icon(size, ns['GOLD_HI'], bg, glow=g, glow_color=GOLD))
+                                  for g in (0.25, 0.45, 0.65, 0.85, 1.0, 0.85, 0.65, 0.45)]
+            self.update_button = tk.Label(row, bg=bg, bd=0, image=self._refresh_idle, cursor='hand2')
+            self.update_button.pack(side='left', padx=(self.px(12), 0))
+            self.update_button.bind('<Button-1>', lambda _e: self.update_clicked())
+            self.update_button.bind('<Enter>', lambda _e: (self.update_state == 'none' and
+                                                           self.update_button.configure(image=self._refresh_hot),
+                                                           self.corner_hint(self.update_hint())))
+            self.update_button.bind('<Leave>', lambda _e: (self.update_state == 'none' and
+                                                           self.update_button.configure(image=self._refresh_idle),
+                                                           self.corner_hint(None)))
+            self.update_state, self.update_version, self.update_page = 'none', None, ns['RELEASES_PAGE']
+            self._glow_frame = 0
+
+        def corner_hint(self, text):
+            """What a sidebar icon does, in the status line while the pointer is on it."""
+            if text:
+                self._status_before = (self.status.cget('text'), self.status.cget('fg'))
+                self.status.configure(text=text, fg=TEXT)
+            elif getattr(self, '_status_before', None):
+                text, fg = self._status_before
+                self._status_before = None
+                self.status.configure(text=text, fg=fg)
+
+        def update_hint(self):
+            version = self.update_version or ''
+            return {'none': _('Up to date (version {}). Click to check for a new version.').format(ns['VERSION']),
+                    'checking': _('Checking for a new version…'),
+                    'downloading': _('Downloading version {}…').format(version),
+                    'ready': _('Version {} is ready. Click to restart the launcher with it.').format(version),
+                    'available': _('Version {} is available. Click to download it.').format(version)}[self.update_state]
+
+        def set_update_state(self, state, version=None):
+            self.update_state = state
+            if version:
+                self.update_version = version
+            if state in ('ready', 'available', 'downloading'):
+                if not getattr(self, '_glowing', False):
+                    self._glowing = True
+                    self.glow()
+            else:
+                self._glowing = False
+                self.update_button.configure(image=self._refresh_idle)
+
+        def glow(self):
+            if not self._glowing:
+                return
+            self._glow_frame = (self._glow_frame + 1) % len(self._refresh_glow)
+            self.update_button.configure(image=self._refresh_glow[self._glow_frame])
+            self.root.after(110, self.glow)
+
+        def update_clicked(self):
+            state = self.update_state
+            if state == 'ready':
+                self.restart_updated()
+            elif state == 'available':
+                open_path(self.update_page)
+            elif state == 'none':
+                self.update_state = 'checking'
+                self.corner_hint(None)
+                self.status.configure(text=_('Checking for a new version…'), fg=MUTED)
+
+                def check():
+                    self.check_update(manual=True)
+                    self.ui_calls.put(lambda: self.update_state == 'checking' and self.set_update_state('none'))
+                threading.Thread(target=check, daemon=True).start()
 
         def style(self):
             super().style()
@@ -555,41 +671,41 @@ def launcher_class(base, ns):
         # ---- updates: the AppImage replaces itself with the newest release of this fork ----------
         def offer_update(self, version, url, page):
             """A newer release: an AppImage downloads it in the background and swaps it in, then
-            offers a restart. Other installs (the tarball, a source tree) get the release page."""
+            the update button glows (click: restart with it). Other installs (the tarball, a
+            source tree): the button glows and opens the release page."""
             parts = version.split('.')
             if len(parts) == 4:  # tag v0.3.1-linux.8 arrives as 0.3.1.8
                 version = '.'.join(parts[:3]) + '-linux.' + parts[3]
-            if self.update_box or not os.environ.get('APPIMAGE') or not url:
-                return super().offer_update(version, url, page)
-            self.update_box = 'downloading'
-            self.status.configure(text=_('Downloading version {}…').format(version), fg=GOLD)
+            if self.update_state in ('downloading', 'ready'):
+                return
+            self.update_page = page or ns['RELEASES_PAGE']
+            if not os.environ.get('APPIMAGE') or not url:
+                self.set_update_state('available', version)
+                if not self.process:
+                    self.status.configure(text=_('Version {} is available.').format(version), fg=GOLD)
+                return
+            self.set_update_state('downloading', version)
+            if not self.process:
+                self.status.configure(text=_('Downloading version {}…').format(version), fg=GOLD)
 
             def work():
                 try:
                     install_appimage(url, Path(os.environ['APPIMAGE']))
                 except (OSError, ValueError) as failure:
                     def failed(error=failure):
-                        self.update_box = None
+                        self.set_update_state('available', version)
                         if not self.process:
                             self.status.configure(text=_('Update failed: {}').format(error), fg=MUTED)
-                        super(LinuxLauncher, self).offer_update(version, None, page)
                     self.ui_calls.put(failed)
                     return
                 self.ui_calls.put(lambda: self.updated(version))
             threading.Thread(target=work, daemon=True).start()
 
         def updated(self, version):
-            tk = self.tk
-            box = tk.Frame(self.side, bg=CARD, highlightthickness=1, highlightbackground=ns['GOLD_DIM'])
-            tk.Label(box, text=_('Version {} is installed. Restart to use it.').format(version), bg=CARD,
-                     fg=GOLD, font=self.font_ui_md, wraplength=self.px(190), justify='left').pack(
-                anchor='w', padx=12, pady=(10, 8))
-            self.pill(box, _('Restart'), self.restart_updated, kind='primary', padding=(14, 6)).pack(
-                anchor='w', padx=12, pady=(0, 12))
-            box.pack(fill='x', padx=18, pady=(0, 14), before=self.side_note)
-            self.update_box = box
+            self.set_update_state('ready', version)
             if not self.process:
-                self.status.configure(text=_('Version {} is installed. Restart to use it.').format(version), fg=GOLD)
+                self.status.configure(text=_('Version {} is ready. Click the glowing button to restart with it.')
+                                      .format(version), fg=GOLD)
 
         def restart_updated(self):
             if self.process:

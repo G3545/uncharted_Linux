@@ -19,7 +19,8 @@ permissions:
 
 concurrency:
   group: build-${{ inputs.ref || github.ref }}
-  cancel-in-progress: true
+  # A release build on main runs to the end (a newer push waits behind it); others are replaced.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' || inputs.ref != '' }}
 
 jobs:
   build:
