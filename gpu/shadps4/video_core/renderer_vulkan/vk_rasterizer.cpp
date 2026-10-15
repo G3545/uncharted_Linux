@@ -123,6 +123,17 @@ void PrintCheckpoint(u64 seq) {
         std::printf("GPU crash:     buffer 0x%llx size 0x%x%s\n",
                     static_cast<unsigned long long>(b.address), b.size,
                     b.written ? " (written)" : "");
+        // Linux fork: the guest copy of small buffers (a hung shader's loop counts and limits).
+        if (b.size && b.size <= 0x400 && b.address) {
+            const auto* words = reinterpret_cast<const u32*>(b.address);
+            for (u32 w = 0; w < b.size / 4; w += 8) {
+                std::printf("GPU crash:       [%3u]", w);
+                for (u32 k = w; k < w + 8 && k < b.size / 4; ++k) {
+                    std::printf(" %08x", words[k]);
+                }
+                std::printf("\n");
+            }
+        }
         VideoCore::PrintFaultHistory(b.address, b.size);
     }
     if (r.args) {
