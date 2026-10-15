@@ -74,7 +74,7 @@ def entry(name, exe, start_dir, icon, options=''):
     ]
 
 
-def add_shortcut(vdf_path, name, exe, start_dir, icon, options='', match_name=False):
+def add_shortcut(vdf_path, name, exe, start_dir, icon, options='', match_options=False):
     """Adds the shortcut to one shortcuts.vdf, or updates the entry that starts the same exe.
     Returns 'added' or 'updated'. A copy of the old file is kept as shortcuts.vdf.bak."""
     vdf_path = Path(vdf_path)
@@ -88,8 +88,10 @@ def add_shortcut(vdf_path, name, exe, start_dir, icon, options='', match_name=Fa
     target = f'"{exe}"'.lower()
     for index, (kind, key, value) in enumerate(shortcuts):
         fields = {k.lower(): v for _t, k, v in value} if kind == MAP else {}
+        # match_options (Linux fork): several entries start the same program (flatpak-spawn,
+        # one per game); only the one with the same launch options is this shortcut.
         if str(fields.get('exe', '')).lower() == target and \
-                (not match_name or str(fields.get('appname', '')) == name):
+                (not match_options or str(fields.get('launchoptions', '')) == options):
             # Keep what Steam or the player added (play time, tags).
             kept = {k.lower() for k in ('LastPlayTime', 'tags')}
             old = {k.lower(): (t, k, v) for t, k, v in value}
