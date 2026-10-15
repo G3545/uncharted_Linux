@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 APP_ID = 'uncharted-linux'
@@ -177,6 +178,29 @@ def desktop_folder():
     return folder if folder.is_dir() else None
 
 
+# ---- Updates --------------------------------------------------------------------------------
+
+def install_appimage(url, target):
+    """Downloads the AppImage at `url` next to `target` and puts it in its place (a rename: the
+    running AppImage keeps its own mounted copy until it closes)."""
+    import urllib.request
+    part = target.with_name(target.name + '.part')
+    request = urllib.request.Request(url, headers={'User-Agent': 'uncharted-linux-launcher'})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response, open(part, 'wb') as out:
+            expected = int(response.headers.get('Content-Length') or 0)
+            shutil.copyfileobj(response, out, 1 << 20)
+        size = part.stat().st_size
+        with open(part, 'rb') as check:
+            magic = check.read(4)
+        if magic != b'\x7fELF' or size < (1 << 20) or (expected and size != expected):
+            raise ValueError('the download is incomplete')
+        part.chmod(0o755)
+        os.replace(part, target)
+    finally:
+        part.unlink(missing_ok=True)
+
+
 # ---- The Linux launcher: a row per game with Play and Add to Steam ---------------------------
 
 def flatpak_steam(steam):
@@ -336,6 +360,57 @@ def launcher_class(base, ns):
 
         def fit_posters(self, _event=None):
             pass
+
+        # ---- updates: the AppImage replaces itself with the newest release of this fork ----------
+        def offer_update(self, version, url, page):
+            """A newer release: an AppImage downloads it in the background and swaps it in, then
+            offers a restart. Other installs (the tarball, a source tree) get the release page."""
+            parts = version.split('.')
+            if len(parts) == 4:  # tag v0.3.1-linux.8 arrives as 0.3.1.8
+                version = '.'.join(parts[:3]) + '-linux.' + parts[3]
+            if self.update_box or not os.environ.get('APPIMAGE') or not url:
+                return super().offer_update(version, url, page)
+            self.update_box = 'downloading'
+            self.status.configure(text=_('Downloading version {}…').format(version), fg=ns['GOLD'])
+
+            def work():
+                try:
+                    install_appimage(url, Path(os.environ['APPIMAGE']))
+                except (OSError, ValueError) as failure:
+                    def failed(error=failure):
+                        self.update_box = None
+                        if not self.process:
+                            self.status.configure(text=_('Update failed: {}').format(error), fg=MUTED)
+                        super(LinuxLauncher, self).offer_update(version, None, page)
+                    self.ui_calls.put(failed)
+                    return
+                self.ui_calls.put(lambda: self.updated(version))
+            threading.Thread(target=work, daemon=True).start()
+
+        def updated(self, version):
+            tk = self.tk
+            box = tk.Frame(self.side, bg=CARD, highlightthickness=1, highlightbackground=ns['GOLD_DIM'])
+            tk.Label(box, text=_('Version {} is installed. Restart to use it.').format(version), bg=CARD,
+                     fg=ns['GOLD'], font=self.font_ui_md, wraplength=self.px(190), justify='left').pack(
+                anchor='w', padx=12, pady=(10, 8))
+            self.pill(box, _('Restart'), self.restart_updated, kind='primary', padding=(14, 6)).pack(
+                anchor='w', padx=12, pady=(0, 12))
+            box.pack(fill='x', padx=18, pady=(0, 14), before=self.side_note)
+            self.update_box = box
+            if not self.process:
+                self.status.configure(text=_('Version {} is installed. Restart to use it.').format(version),
+                                      fg=ns['GOLD'])
+
+        def restart_updated(self):
+            if self.process:
+                self.messagebox.showinfo(NAME, _('Close the game before restarting.'))
+                return
+            env = clean_env()
+            for name in ('APPIMAGE', 'APPDIR', 'ARGV0', 'OWD'):  # the new AppImage sets its own
+                env.pop(name, None)
+            subprocess.Popen([os.environ['APPIMAGE']], env=env, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            self.close()
 
         def add_to_steam(self):
             for key, *_rest in GAMES:

@@ -1585,7 +1585,8 @@ def latest_release():
         release = json.load(response)
     version = '.'.join(re.findall(r'\d+', release['tag_name']))
     url = next((asset['browser_download_url'] for asset in release.get('assets', [])
-                if asset.get('name', '').lower().endswith('.zip')), None)
+                if (asset.get('name', '').lower().endswith('.zip') if WINDOWS  # Linux fork: the AppImage
+                    else asset.get('name') == 'Uncharted-x86_64.AppImage')), None)
     return version, url, release.get('html_url') or RELEASES_PAGE
 
 

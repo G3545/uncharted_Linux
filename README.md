@@ -20,7 +20,9 @@ curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main
 ```
 
 It puts `Uncharted-x86_64.AppImage` in `~/Applications` and adds **Uncharted** to the
-application menu and the desktop. Run it again to update. To remove it, run
+application menu and the desktop. The launcher updates itself: when a new release is out, it
+downloads it in the background and offers a restart. You can turn that off on the
+**Advanced** page. To remove it, run
 `curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh -s -- --uninstall`.
 Saves and settings live in `~/.local/share/uncharted-linux` and are kept either way.
 
