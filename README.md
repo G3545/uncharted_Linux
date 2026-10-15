@@ -1,10 +1,6 @@
 # Uncharted: The Nathan Drake Collection for Linux/Steam Deck
 
-**Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).** Mohammed Albarghouthi
-
-Same idea as my [Bloodborne port](https://github.com/Supermedo/bloodborne_pc): the original PS4 game
-code runs directly on your PC and the graphics are translated to Vulkan. Install it with one
-command, pick your game folder and press **Play** next to the game you want.
+**Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).
 
 This fork builds SuperMedo's Windows port for Linux and the Steam Deck. It picks up new upstream
 versions automatically (see [Staying up to date](#staying-up-to-date)). Status: early, so expect
@@ -12,8 +8,7 @@ problems.
 
 ## Install
 
-Run this in a terminal. It's the same command on every Linux distribution and on the Steam Deck
-(in Desktop Mode, using **Konsole**):
+Terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh
@@ -26,7 +21,7 @@ downloads it in the background and offers a restart. You can turn that off on th
 `curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh -s -- --uninstall`.
 Saves and settings live in `~/.local/share/uncharted-linux` and are kept either way.
 
-**Prefer not to use a terminal?**
+Appimage:
 1. Download **[Uncharted-x86_64.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage)**.
 2. Right-click it, open **Properties → Permissions** and tick **Is executable** (or
    **Allow executing file as program**).
@@ -34,8 +29,8 @@ Saves and settings live in `~/.local/share/uncharted-linux` and are kept either 
 
 **First start:** choose your game folder on the **Game** page, then press **Play** next to a game.
 
-**Steam Deck:** press **Add to Steam** next to each game instead. Steam restarts and the game
-appears in your library as a Non-Steam game. Go back to Gaming Mode and play it from there. It
+You can also press **Add to Steam** next to each game instead. Steam restarts and the game
+appears in your library as a Non-Steam game. On Steam Deck, go back to Gaming Mode and play it from there. It
 uses the settings saved in the launcher. The buttons only work for games whose files are in the
 game folder.
 
