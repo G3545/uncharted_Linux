@@ -316,11 +316,13 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, u32 elemen
             value = ctx.OpFMul(ctx.F32[1], value, value);
         }
         if (LinuxFork::ExportNanGuard() && !OutputAttrComponentType(ctx, attr).second) {
-            // Linux fork: NaN -> 0, +-Inf -> +-65504 (linux_fork.h).
+            // Linux fork: NaN -> 0; mode 2 also +-Inf -> +-65504 (linux_fork.h).
             // NaN first: FClamp may return either bound for a NaN.
             value = ctx.OpSelect(ctx.F32[1], ctx.OpIsNan(ctx.U1[1], value), ctx.f32_zero_value, value);
-            const Id limit{ctx.ConstF32(65504.0f)};
-            value = ctx.OpFClamp(ctx.F32[1], value, ctx.OpFNegate(ctx.F32[1], limit), limit);
+            if (LinuxFork::NanGuardMode() == 2) {
+                const Id limit{ctx.ConstF32(65504.0f)};
+                value = ctx.OpFClamp(ctx.F32[1], value, ctx.OpFNegate(ctx.F32[1], limit), limit);
+            }
         }
         if (info.num_components == 1) {
             return op_store(info.id);
