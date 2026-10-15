@@ -91,10 +91,12 @@ private:
     }
 
     void Retire() {
-        // Linux fork: the GPU tick other paths already read first; a fresh one (an ioctl) only
-        // when that frees nothing, and then once per 16 calls (it was once per draw).
+        // Linux fork: the GPU tick other paths already read first; a fresh one (an ioctl) when
+        // that frees nothing. (Polling only every 16th call made draws fall back to reading their
+        // constants later, from guest memory the game had already rewritten: Uncharted 3's
+        // characters stretched on the Steam Deck.)
         auto* semaphore = scheduler.GetWorkSemaphore();
-        if (!RetireKnown(semaphore) && (++retire_polls & 15) == 0) {
+        if (!RetireKnown(semaphore)) {
             semaphore->Refresh();
             RetireKnown(semaphore);
         }
@@ -112,7 +114,6 @@ private:
         return at != first;
     }
 
-    u32 retire_polls = 0; ///< stage A
 
     struct StampEntry {
         u64 end;
