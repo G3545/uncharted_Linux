@@ -32,9 +32,10 @@ Saves and settings live in `~/.local/share/uncharted-linux` and are kept either 
 
 **First start:** choose your game folder on the **Game** page, then press **Play** next to a game.
 
-**Steam Deck:** press **Add to Steam** instead. Steam restarts, and Uncharted 1, 2 and 3 appear
-in your library as separate Non-Steam games. Go back to Gaming Mode and play them from there.
-They use the settings saved in the launcher.
+**Steam Deck:** press **Add to Steam** next to each game instead. Steam restarts and the game
+appears in your library as a Non-Steam game. Go back to Gaming Mode and play it from there. It
+uses the settings saved in the launcher. The buttons only work for games whose files are in the
+game folder.
 
 **Your game files:** copy the dump folder to the Deck or PC, for example `~/Games/CUSA02343`.
 A microSD card works too (`/run/media/deck/<card>/...`).
