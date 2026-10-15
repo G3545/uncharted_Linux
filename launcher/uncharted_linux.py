@@ -16,6 +16,17 @@ import threading
 import time
 
 APP_ID = 'uncharted-linux'
+
+# The packaged Python and OpenSSL come from Debian and look for certificates in /usr/lib/ssl,
+# which Fedora and others do not have: every HTTPS request (update check) failed there. Point
+# them, and the game (online play), at the system's bundle.
+if not os.environ.get('SSL_CERT_FILE'):
+    for _bundle in ('/etc/ssl/certs/ca-certificates.crt', '/etc/pki/tls/certs/ca-bundle.crt',
+                    '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem', '/etc/ssl/cert.pem',
+                    '/etc/ssl/ca-bundle.pem'):
+        if os.path.isfile(_bundle):
+            os.environ['SSL_CERT_FILE'] = _bundle
+            break
 TITLE = 'Uncharted: The Nathan Drake Collection'
 
 
