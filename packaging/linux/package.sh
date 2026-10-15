@@ -39,7 +39,7 @@ strip --strip-debug -o "$dest/bin/bb-probe" out/bb-probe
 strip --strip-debug -o "$dest/bin/bb-gpu-capabilities" out/bb-gpu-capabilities
 strip --strip-debug -o "$dest/bin/gpu/libbbgpu.so" out/gpu/libbbgpu.so
 # Libraries every desktop and SteamOS have (or that must match the graphics driver) stay out.
-system='^(ld-linux|libc|libm|libdl|libpthread|librt|libresolv|libutil|libgcc_s|libstdc\+\+|libvulkan|libX|libxcb|libxkb|libwayland|libdrm|libGL|libEGL|libgbm|libasound|libpulse|libpipewire|libdbus|libudev|libsystemd|libz|libzstd|libexpat|libelf|libLLVM|libffi|libcap|libselinux|libgcrypt|libgpg-error|liblzma|libbz2|libmount|libblkid|libglib|libgobject|libgio|libgmodule|libpcre2|libdecor|libxshmfence|libsensors)[.-]'
+system='^(ld-linux|libc|libm|libdl|libpthread|librt|libresolv|libutil|libgcc_s|libstdc\+\+|libvulkan|libX|libxcb|libxkb|libwayland|libdrm|libGL|libEGL|libgbm|libasound|libpulse|libpipewire|libdbus|libudev|libsystemd|libz|libzstd|libexpat|libelf|libLLVM|libffi|libcap|libgcrypt|libgpg-error|liblzma|libmount|libblkid|libglib|libgobject|libgio|libgmodule|libpcre2|libdecor|libxshmfence|libsensors)[.-]'
 ldd out/bb-probe out/gpu/libbbgpu.so out/bb-gpu-capabilities | awk '/=> \// {print $1, $3}' | sort -u |
     while read -r name path; do
         [[ $name =~ $system ]] || cp -L "$path" "$dest/bin/lib/$name"
