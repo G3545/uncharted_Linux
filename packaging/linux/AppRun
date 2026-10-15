@@ -1,0 +1,6 @@
+#!/bin/sh
+# AppImage entry point: the launcher, with its writable data outside the read-only image.
+here=$(dirname "$(readlink -f "$0")")
+export BB_DATA_DIR="${BB_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/uncharted-linux}"
+mkdir -p "$BB_DATA_DIR"
+exec "$here/Uncharted" "$@"

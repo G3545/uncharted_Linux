@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Uncharted
+Comment=Uncharted: The Nathan Drake Collection for Linux
+Exec=AppRun
+Icon=uncharted-linux
+Terminal=false
+Categories=Game;
