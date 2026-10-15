@@ -367,6 +367,8 @@ class Launcher:
         root.title(f'{NAME} — The Nathan Drake Collection for {platform} · by {AUTHOR}')
         root.configure(bg=BG)
         self.dpi = root.winfo_fpixels('1i') / 96.0
+        if not WINDOWS:  # Linux fork: desktop scaling that enlarges fonts but not the X DPI
+            self.dpi *= uncharted_linux.font_scale(root)
         root.geometry(f'{self.px(1180)}x{self.px(860)}')
         root.minsize(self.px(1040), self.px(760))
         if not WINDOWS:  # Linux fork: fit small screens (the Steam Deck's 1280x800)

@@ -12,35 +12,29 @@ problems.
 
 ## Install
 
-**Steam Deck:** switch to Desktop Mode (hold the power button, then **Switch to Desktop**),
-open **Konsole** and run:
+Run this in a terminal. It's the same command on every Linux distribution and on the Steam Deck
+(in Desktop Mode, using **Konsole**):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh
 ```
 
-Then open **Uncharted** from the desktop icon or the application menu (Games). Choose your game
-folder on the **Game** page and press **Add to Steam**. Steam restarts, and Uncharted 1, 2 and 3
-appear in your library as separate Non-Steam games. Go back to Gaming Mode and play them from
-there. They use the settings saved in the launcher.
-
-**Any other Linux distribution:** run the same command in a terminal:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh
-```
-
-Open **Uncharted** from your application menu, choose your game folder and press **Play**.
-
-The installer puts `Uncharted-x86_64.AppImage` in `~/Applications` and adds a menu entry and a
-desktop icon. Run the same command again to update. To remove it, run
+It puts `Uncharted-x86_64.AppImage` in `~/Applications` and adds **Uncharted** to the
+application menu and the desktop. Run it again to update. To remove it, run
 `curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh -s -- --uninstall`.
 Saves and settings live in `~/.local/share/uncharted-linux` and are kept either way.
 
-**Without the installer:** download `Uncharted-x86_64.AppImage` from the
-[latest release](https://github.com/spacepepperoni/uncharted_Linux/releases/latest), make it
-executable (`chmod +x Uncharted-x86_64.AppImage`) and run it. A plain `uncharted-linux.tar.gz`
-is in each release too.
+**Prefer not to use a terminal?**
+1. Download **[Uncharted-x86_64.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage)**.
+2. Right-click it, open **Properties → Permissions** and tick **Is executable** (or
+   **Allow executing file as program**).
+3. Double-click it.
+
+**First start:** choose your game folder on the **Game** page, then press **Play** next to a game.
+
+**Steam Deck:** press **Add to Steam** instead. Steam restarts, and Uncharted 1, 2 and 3 appear
+in your library as separate Non-Steam games. Go back to Gaming Mode and play them from there.
+They use the settings saved in the launcher.
 
 **Your game files:** copy the dump folder to the Deck or PC, for example `~/Games/CUSA02343`.
 A microSD card works too (`/run/media/deck/<card>/...`).

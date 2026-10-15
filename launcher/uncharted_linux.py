@@ -289,3 +289,29 @@ def launcher_class(base, ns):
                                              'the settings saved in this launcher.'))
 
     return LinuxLauncher
+
+
+def font_scale(root):
+    """How much larger fonts are drawn than Tk's screen DPI says: KDE/GNOME scaling under
+    XWayland sets Xft.dpi (206 at 215 %) while X reports 96 DPI, and Xft draws every font at
+    Xft.dpi. The layout is scaled by the same factor so the text fits."""
+    try:
+        x11 = ctypes.CDLL(ctypes.util.find_library('X11') or 'libX11.so.6')
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XResourceManagerString.restype = ctypes.c_char_p
+        x11.XResourceManagerString.argtypes = [ctypes.c_void_p]
+        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        display = x11.XOpenDisplay(None)
+        if not display:
+            return 1.0
+        try:
+            resources = (x11.XResourceManagerString(display) or b'').decode(errors='replace')
+        finally:
+            x11.XCloseDisplay(display)
+        dpi = next((float(line.split(':', 1)[1]) for line in resources.splitlines()
+                    if line.split(':', 1)[0].strip() == 'Xft.dpi'), None)
+        scale = dpi / root.winfo_fpixels('1i') if dpi else 1.0
+    except (OSError, ValueError, AttributeError):
+        return 1.0
+    return scale if 1.1 <= scale <= 4.0 else 1.0
