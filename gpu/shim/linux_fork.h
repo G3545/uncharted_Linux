@@ -22,6 +22,16 @@ inline bool ExportNanGuard() {
     return NanGuardMode() != 0;
 }
 
+/// VK_EXT_vertex_input_dynamic_state: BB_VERTEX_INPUT_DS=0 turns it off, =1 forces it on; by
+/// default it is off only where it is known to break (`broken_driver`).
+inline bool VertexInputDynamicStateAllowed(bool broken_driver) {
+    const char* env = std::getenv("BB_VERTEX_INPUT_DS");
+    if (env && (env[0] == '0' || env[0] == '1')) {
+        return env[0] == '1';
+    }
+    return !broken_driver;
+}
+
 /// Shaders compiled in each mode are cached apart.
 inline const char* ShaderCacheSuffix() {
     return NanGuardMode() == 1 ? "-nan1" : NanGuardMode() == 2 ? "-nan2" : "";
