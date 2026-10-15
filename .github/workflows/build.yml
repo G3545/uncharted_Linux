@@ -7,12 +7,18 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # sync-upstream.yml builds a merge of upstream before it reaches main (no release then).
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
 
 permissions:
   contents: write
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -34,6 +40,7 @@ jobs:
             libminiupnpc-dev glslang-tools glslang-dev spirv-headers
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || '' }}
           submodules: recursive
           fetch-depth: 0
       - name: Build
@@ -52,7 +59,7 @@ jobs:
             dist/Uncharted-x86_64.AppImage
             dist/uncharted-linux.tar.gz
       - name: Release
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && !inputs.ref
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
