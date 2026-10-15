@@ -12,6 +12,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <unistd.h>
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>

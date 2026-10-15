@@ -32,7 +32,10 @@ PORT_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).r
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 DATA_DIR = Path(os.environ.get('BB_DATA_DIR', PORT_DIR))
-CONFIG_DIR = Path(os.environ.get('APPDATA', Path.home())) / 'uncharted-launcher'
+WINDOWS = sys.platform == 'win32'
+if not WINDOWS:
+    import uncharted_linux  # Linux fork: the Linux counterparts of the Windows calls below
+CONFIG_DIR = (Path(os.environ.get('APPDATA', Path.home())) if WINDOWS else uncharted_linux.config_dir().parent) / 'uncharted-launcher'
 CONFIG_FILE = CONFIG_DIR / 'settings.json'
 NAME = 'Uncharted'
 AUTHOR = 'SuperMedo'
@@ -40,6 +43,13 @@ AUTHOR = 'SuperMedo'
 VERSION = '0.3.1'
 RELEASES_API = 'https://api.github.com/repos/Supermedo/uncharted_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/Supermedo/uncharted_pc/releases/latest'
+if not WINDOWS:  # Linux fork: its own releases (the Linux builds), tagged v<upstream>-linux.<n>
+    try:
+        VERSION = (PORT_DIR / 'LINUX_BUILD').read_text().strip() or VERSION
+    except OSError:
+        pass
+    RELEASES_API = 'https://api.github.com/repos/spacepepperoni/uncharted_Linux/releases/latest'
+    RELEASES_PAGE = 'https://github.com/spacepepperoni/uncharted_Linux/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'uncharted-update'
 # Never copied over an installation by an update (the package does not hold them either).
 USER_FILES = ('user', 'out', 'art', 'bbport.ini', 'input.ini', 'last_run.log')
@@ -151,6 +161,8 @@ def _(text):
 
 def attach_stdio():
     """A windowed executable starts without sys.stdout; inherited pipes or a console still exist."""
+    if not WINDOWS:
+        return
     import msvcrt
     for name, std in (('stdout', -11), ('stderr', -12)):
         if getattr(sys, name) is not None:
@@ -351,11 +363,17 @@ class Launcher:
         self.card_hot = None
         self.info = None
         self.update_box = None
-        root.title(f'{NAME} — The Nathan Drake Collection for Windows · by {AUTHOR}')
+        platform = 'Windows' if WINDOWS else 'Linux/Steam Deck'
+        root.title(f'{NAME} — The Nathan Drake Collection for {platform} · by {AUTHOR}')
         root.configure(bg=BG)
         self.dpi = root.winfo_fpixels('1i') / 96.0
         root.geometry(f'{self.px(1180)}x{self.px(860)}')
         root.minsize(self.px(1040), self.px(760))
+        if not WINDOWS:  # Linux fork: fit small screens (the Steam Deck's 1280x800)
+            width = min(self.px(1180), root.winfo_screenwidth())
+            height = min(self.px(860), root.winfo_screenheight() - 60)
+            root.geometry(f'{width}x{height}')
+            root.minsize(min(self.px(1040), width), min(self.px(760), height))
         self.set_icon()
         self.load_fonts()
         self.style()
@@ -370,6 +388,9 @@ class Launcher:
         return int(size * self.dpi)
 
     def set_icon(self):
+        if not WINDOWS:
+            uncharted_linux.set_icon(self.root, self.tk)
+            return
         try:
             self.root.iconbitmap(default=str(PORT_DIR / 'launcher' / 'uncharted.ico'))
         except self.tk.TclError:
@@ -674,7 +695,8 @@ class Launcher:
             self.nav[name], self.nav_pills[name], self.nav_marks[name] = item, pill, mark
         tk.Frame(side, bg=BG).pack(fill='both', expand=True)
         self.side = side
-        self.side_note = tk.Label(side, text=_('Native port: the original PS4 game code runs directly on Windows.'),
+        self.side_note = tk.Label(side, text=_('Native port: the original PS4 game code runs directly on Windows.') if WINDOWS else
+                                  _('Native port: the original PS4 game code runs directly on Linux.'),
                                   bg=BG, fg=MUTED, font=('Segoe UI', 9), justify='left',
                                   wraplength=side_w - 36)
         self.side_note.pack(anchor='w', padx=18, pady=(0, 18))
@@ -1238,12 +1260,13 @@ class Launcher:
         try:
             self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=game_environment(self.app),
                                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                            stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+                                            stderr=subprocess.STDOUT, creationflags=NO_WINDOW,
+                                            **({} if WINDOWS else uncharted_linux.GameJob.popen_options))
         except OSError as error:
             self.append(_('Could not start: {}').format(error) + '\n')
             self.process = None
             return
-        self.job = GameJob(self.process)
+        self.job = (GameJob if WINDOWS else uncharted_linux.GameJob)(self.process)
         self.entered, self.last_problem, self.stopping = False, '', False
         threading.Thread(target=self.read_output, args=(self.process,), daemon=True).start()
         self.play_button.configure(state='disabled')
@@ -1338,6 +1361,9 @@ class Launcher:
         path = Path(path or DATA_DIR)
         if not path.exists():
             path.mkdir(parents=True, exist_ok=True)
+        if not WINDOWS:
+            uncharted_linux.open_path(path)
+            return
         os.startfile(str(path))
 
     # ---- updates -------------------------------------------------------------------------------
@@ -1383,7 +1409,7 @@ class Launcher:
         if self.process:
             self.messagebox.showinfo(NAME, _('Close the game before updating.'))
             return
-        if not FROZEN or not url:  # a source tree updates with git
+        if not FROZEN or not url or not WINDOWS:  # a source tree updates with git; Linux: the page
             webbrowser.open(page)
             return
         if not self.messagebox.askyesno(NAME, _(
@@ -1436,6 +1462,13 @@ class Launcher:
 
     def shortcut(self):
         """Uncharted.lnk on the desktop."""
+        if not WINDOWS:
+            try:
+                uncharted_linux.desktop_entry(__file__, PORT_DIR)
+                self.messagebox.showinfo(NAME, _('Shortcut created on the desktop.'))
+            except OSError as error:
+                self.messagebox.showerror(NAME, str(error))
+            return
         if FROZEN:
             target, arguments, icon = sys.executable, '', f'{sys.executable},0'
         else:
@@ -1456,26 +1489,31 @@ class Launcher:
     def add_to_steam(self):
         """The collection in the Steam library (a non-Steam game that starts Uncharted.exe --play)."""
         import bbport_steam
-        steam = bbport_steam.steam_folder()
+        steam = bbport_steam.steam_folder() if WINDOWS else uncharted_linux.steam_folder()
         configs = bbport_steam.user_configs(steam) if steam else []
         if not configs:
             self.messagebox.showerror(NAME, _('Steam was not found on this PC (or nobody has signed in to it yet).'))
             return
-        if FROZEN:
+        if not WINDOWS:
+            exe, options = uncharted_linux.launch_target(__file__)
+        elif FROZEN:
             exe, options = Path(sys.executable), '--play'
         else:
             pythonw = Path(sys.executable).with_name('pythonw.exe')
             exe, options = (pythonw if pythonw.exists() else Path(sys.executable)), f'"{Path(__file__).resolve()}" --play'
         self.collect()
         restart = False
-        if bbport_steam.steam_running():
+        if (bbport_steam.steam_running() if WINDOWS else uncharted_linux.steam_running()):
             if not self.messagebox.askyesno(NAME, _('Steam has to close while the game is added; it starts '
                                                     'again afterwards. Close Steam now?')):
                 return
-            subprocess.Popen([str(steam / 'steam.exe'), '-shutdown'], creationflags=NO_WINDOW)
+            if WINDOWS:
+                subprocess.Popen([str(steam / 'steam.exe'), '-shutdown'], creationflags=NO_WINDOW)
+            else:
+                uncharted_linux.steam_shutdown(steam)
             for _i in range(60):
                 time.sleep(0.5)
-                if not bbport_steam.steam_running():
+                if not (bbport_steam.steam_running() if WINDOWS else uncharted_linux.steam_running()):
                     break
             else:
                 self.messagebox.showerror(NAME, _('Steam did not close. Close it yourself and try again.'))
@@ -1497,7 +1535,10 @@ class Launcher:
             self.messagebox.showerror(NAME, _('Could not add the game to Steam: {}').format(error))
             return
         if restart:
-            os.startfile('steam://open/games')
+            if WINDOWS:
+                os.startfile('steam://open/games')
+            else:
+                uncharted_linux.open_path('steam://open/games')
         self.messagebox.showinfo(NAME, _('The collection is in your Steam library. It starts with the settings '
                                          'saved in this launcher.'))
 
@@ -1602,15 +1643,24 @@ def main():
         shutil.rmtree(UPDATE_DIR, ignore_errors=True)  # what a finished update left behind
     settings = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
     if '--play' in args and (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file():
+        # Linux fork: `--play u2` starts that game (one Steam entry per game).
+        after = args[args.index('--play') + 1:]
+        if after and after[0] in [key for key, *_rest in GAMES]:
+            settings['start'] = after[0]
         sys.exit(play_without_window(settings))
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except (AttributeError, OSError):
         pass
+    if not WINDOWS:  # the bundled Cinzel, for Tk through fontconfig
+        from uncharted_fonts import font_path
+        for name in ('Cinzel-Regular.ttf', 'Cinzel-SemiBold.ttf', 'Cinzel-Bold.ttf'):
+            if font_path(name):
+                uncharted_linux.add_font(font_path(name))
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     root = tk.Tk()
-    Launcher(root, tk, ttk, filedialog, messagebox)
+    (Launcher if WINDOWS else uncharted_linux.launcher_class(Launcher, globals()))(root, tk, ttk, filedialog, messagebox)
     root.mainloop()
 
 

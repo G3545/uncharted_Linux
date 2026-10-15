@@ -644,8 +644,14 @@ void runtime_restart(void) {
     /* The new launch waits for this process's GPU device to go away (run.py --after). */
     TerminateProcess(GetCurrentProcess(),0);
 #else
-    puts("Runtime: restarting through run.sh");
     syscall(SYS_close_range, 3u, ~0u, 0u);
+    /* Linux fork: run.py's command line when it started the game, else run.sh. */
+    const char *command=getenv("BB_RESTART_COMMAND");
+    if (command && *command) {
+        puts("Runtime: restarting through run.py");
+        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+    }
+    puts("Runtime: restarting through run.sh");
     execlp("bash", "bash", "run.sh", (char *)NULL);
     perror("runtime_restart: exec");
     _exit(1);

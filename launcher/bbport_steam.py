@@ -74,7 +74,7 @@ def entry(name, exe, start_dir, icon, options=''):
     ]
 
 
-def add_shortcut(vdf_path, name, exe, start_dir, icon, options=''):
+def add_shortcut(vdf_path, name, exe, start_dir, icon, options='', match_name=False):
     """Adds the shortcut to one shortcuts.vdf, or updates the entry that starts the same exe.
     Returns 'added' or 'updated'. A copy of the old file is kept as shortcuts.vdf.bak."""
     vdf_path = Path(vdf_path)
@@ -88,7 +88,8 @@ def add_shortcut(vdf_path, name, exe, start_dir, icon, options=''):
     target = f'"{exe}"'.lower()
     for index, (kind, key, value) in enumerate(shortcuts):
         fields = {k.lower(): v for _t, k, v in value} if kind == MAP else {}
-        if str(fields.get('exe', '')).lower() == target:
+        if str(fields.get('exe', '')).lower() == target and \
+                (not match_name or str(fields.get('appname', '')) == name):
             # Keep what Steam or the player added (play time, tags).
             kept = {k.lower() for k in ('LastPlayTime', 'tags')}
             old = {k.lower(): (t, k, v) for t, k, v in value}
