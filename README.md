@@ -41,11 +41,15 @@ Once your game folder has been specified, you're ready to play either by clickin
 ## Features
 
 - All three games from one launcher: Drake's Fortune, Among Thieves and Drake's Deception.
-- Steam Deck Mode: optimizes for Steam Deck and is automatically applied on SteamOS.
 - Anti-aliasing with TAA or AMD FSR 3.1. (NVIDIA DLSS and AMD FSR 4 are in the Windows version only.)
 - Frame generation: AMD FSR 3 (any GPU).
 - Keyboard, mouse and controller together, all remappable. Mouse look in U3.
 - Each game can be added to Steam individually
+
+## Steam Deck
+
+- In the Display tab, a Steam Deck mode is auto-selected if you are on SteamOS. With this enabled, expect an average of 25-30fps with occasional dips during demanding segments.
+- It is recommended to set your FPS cap to 30fps on the Steam Deck power menu.
 
 ## Requirements
 
