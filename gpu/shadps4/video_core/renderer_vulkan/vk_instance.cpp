@@ -13,7 +13,6 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
-#include "linux_fork.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
@@ -306,13 +305,13 @@ bool Instance::CreateDevice() {
     custom_border_color = add_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
     depth_clip_control = add_extension(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME);
     depth_clip_enable = add_extension(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
-    // Linux fork: BB_VERTEX_INPUT_DS=0/1 overrides; off by default on Intel's Windows driver, where
-    // it leaves the screen black (upstream issue #56, the same fix as the God of War III port).
-    if (LinuxFork::VertexInputDynamicStateAllowed(driver_id == vk::DriverId::eIntelProprietaryWindows)) {
-        vertex_input_dynamic_state = add_extension(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
-    } else {
-        LOG_INFO(Render_Vulkan, "VK_EXT_vertex_input_dynamic_state left off (BB_VERTEX_INPUT_DS)");
-    }
+    // bbport: Intel's Windows driver draws nothing with it (HD 630: black screen, issue #56; the
+    // God of War III port saw the same). BB_VERTEX_INPUT_DYNAMIC=1/0 forces it on or off.
+    const char* vertex_input_env = std::getenv("BB_VERTEX_INPUT_DYNAMIC");
+    const bool vertex_input_wanted =
+        vertex_input_env ? vertex_input_env[0] == '1' : GetVendorID() != 0x8086;
+    vertex_input_dynamic_state =
+        vertex_input_wanted && add_extension(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
     list_restart = add_extension(VK_EXT_PRIMITIVE_TOPOLOGY_LIST_RESTART_EXTENSION_NAME);
     if (list_restart) {
         list_restart_features =
