@@ -325,6 +325,8 @@ def game_environment(s, start=None):
     env['BB_FSR_SHARPNESS'] = str(s.get('aa_sharpness') or '0')
     env['BB_FRAME_GEN'] = str(s.get('frame_generation') or 'off')
     env['BB_FRAME_GEN_MULTIPLIER'] = str(s.get('frame_gen_multiplier') or '2')
+    if not WINDOWS:  # Linux fork: Steam Deck mode, before the player's own variables
+        uncharted_linux.deck_environment(s, env)
     for item in str(s['extra_env']).split():
         if '=' in item:
             key, value = item.split('=', 1)
@@ -1644,13 +1646,23 @@ def main():
         sys.exit(install_update(args[1], args[2]))
     if FROZEN and UPDATE_DIR not in PORT_DIR.parents:
         shutil.rmtree(UPDATE_DIR, ignore_errors=True)  # what a finished update left behind
+    if not WINDOWS:
+        uncharted_linux.apply_defaults(globals())
     settings = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
     if '--play' in args and (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file():
-        # Linux fork: `--play u2` starts that game (one Steam entry per game).
+        # Linux fork: `--play u2` starts that game (one Steam entry per game); the update check
+        # runs beside the game (Gaming Mode never opens the launcher); earlier logs are kept.
         after = args[args.index('--play') + 1:]
         if after and after[0] in [key for key, *_rest in GAMES]:
             settings['start'] = after[0]
-        sys.exit(play_without_window(settings))
+        if WINDOWS:
+            sys.exit(play_without_window(settings))
+        uncharted_linux.rotate_logs(Path(settings.get('user_dir') or DATA_DIR / 'user'))
+        updater = uncharted_linux.update_in_background(latest_release, version_tuple, VERSION, settings)
+        code = play_without_window(settings)
+        if updater:
+            updater.join(20)  # a download still running when the game ends gets a moment
+        sys.exit(code)
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except (AttributeError, OSError):

@@ -217,42 +217,112 @@ def steam_command(steam, launcher_file, game):
     return str(exe), options
 
 
-def steam_logo(size, color, background):
-    """The Steam logo, drawn (anti-aliased) as a PIL image: a disc with the piston, two wheels on
-    a rod, cut out in the background colour."""
-    from PIL import Image, ImageDraw
-    scale = 4
-    n = size * scale
+REPO_URL = 'https://github.com/spacepepperoni/uncharted_Linux'
+
+
+def icon_image(name, size, color, background):
+    """launcher/icons/<name>.png (white on transparent: Simple Icons, CC0) in `color` on
+    `background`, as a PIL image of size x size."""
+    from PIL import Image
+    folder = Path(getattr(sys, '_MEIPASS', '')) / 'icons'
+    if not folder.is_dir():
+        folder = Path(__file__).resolve().parent / 'icons'
+    mask = Image.open(folder / f'{name}.png').convert('RGBA').getchannel('A').resize((size, size), Image.LANCZOS)
 
     def rgb(value):
         return tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
-    image = Image.new('RGB', (n, n), rgb(background))
-    draw = ImageDraw.Draw(image)
-    draw.ellipse((0, 0, n - 1, n - 1), fill=rgb(color))
-    cut = rgb(background)
-    big = (0.66 * n, 0.36 * n, 0.19 * n)  # x, y, radius of the large wheel
-    small = (0.34 * n, 0.68 * n, 0.11 * n)
-    draw.line((small[0], small[1], big[0], big[1]), fill=cut, width=int(0.12 * n))
-    for x, y, r in (big, small):
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=cut)
-    x, y, r = big
-    draw.ellipse((x - 0.55 * r, y - 0.55 * r, x + 0.55 * r, y + 0.55 * r), fill=rgb(color))
-    x, y, r = small
-    draw.ellipse((x - 0.45 * r, y - 0.45 * r, x + 0.45 * r, y + 0.45 * r), fill=rgb(color))
-    return image.resize((size, size), Image.LANCZOS)
+    image = Image.new('RGB', (size, size), rgb(background))
+    image.paste(Image.new('RGB', (size, size), rgb(color)), (0, 0), mask)
+    return image
+
+
+def desktop_game_entry(launcher_file, key, name):
+    """`name` (one game) in the application menu and on the desktop."""
+    exe, options = launch_target(launcher_file)
+    data = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share')
+    icon = data / 'icons' / 'hicolor' / '256x256' / 'apps' / 'uncharted-linux.png'
+    text = ('[Desktop Entry]\nType=Application\n'
+            f'Name={name}\nExec="{exe}" {options} {key}\nIcon={icon if icon.is_file() else ""}\n'
+            'Terminal=false\nCategories=Game;\n')
+    written = []
+    for folder in (data / 'applications', desktop_folder()):
+        if folder is None:
+            continue
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f'{APP_ID}-{key}.desktop'
+        path.write_text(text, encoding='utf-8')
+        path.chmod(0o755)
+        written.append(path)
+    return written
+
+
+def apply_defaults(ns):
+    """Linux settings the Windows launcher does not have: Steam Deck mode (on by default on
+    SteamOS) and a 30 FPS frame rate."""
+    ns['APP_DEFAULTS'].setdefault('steam_deck', steam_deck())
+    if not any(value == '30' for value, _text in ns['FRAME_RATES']):
+        ns['FRAME_RATES'].insert(0, ('30', '30 FPS (Steam Deck)'))
+
+
+def deck_environment(settings, env):
+    """Steam Deck mode: what the Deck needs to hold 30 FPS. Applied before the player's own
+    Environment entries, which can override any of it."""
+    if not settings.get('steam_deck'):
+        return
+    env['BB_VBLANK_HZ'] = '30'           # a steady 30 instead of an uneven 15-25
+    env['BB_WINDOW_SIZE'] = '1280x800'   # the Deck's screen: no 1080p output pass to scale down
+    env['BB_PRESENT_MODE'] = 'Fifo'      # gamescope paces FIFO best
+    env['BB_FULLSCREEN'] = '1'
+    env['BB_FRAME_STATS'] = '1'          # frame time breakdown in last_run.log (tuning the Deck)
+
+
+def rotate_logs(folder, keep=5):
+    """last_run.log -> last_run.1.log ... (the previous runs stay readable)."""
+    folder = Path(folder)
+    for n in range(keep - 1, 0, -1):
+        older = folder / f'last_run.{n}.log'
+        newer = folder / ('last_run.log' if n == 1 else f'last_run.{n - 1}.log')
+        if newer.is_file():
+            try:
+                os.replace(newer, older)
+            except OSError:
+                pass
+
+
+def update_in_background(latest_release, version_tuple, version, settings):
+    """Games started from Steam (Gaming Mode) never open the launcher: the update check runs
+    beside the game and the new AppImage is swapped in for the next start. Returns the thread."""
+    if not os.environ.get('APPIMAGE') or not settings.get('check_updates', True):
+        return None
+
+    def work():
+        try:
+            newest, url, _page = latest_release()
+            if url and version_tuple(newest) > version_tuple(version):
+                install_appimage(url, Path(os.environ['APPIMAGE']))
+                print(f'Update: version {newest} installed for the next start')
+        except (OSError, ValueError, KeyError):
+            pass
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    return thread
 
 
 def launcher_class(base, ns):
     """A subclass of the launcher's Launcher (ns: the launcher module's globals): the Play page
-    lists the three games, each with Play and Add to Steam, usable only when that game's
-    executable is in the chosen folder."""
+    lists the three games, each with Add to Steam, Desktop shortcut and Play, usable only when
+    that game's executable is in the chosen folder."""
     _ = ns['_']
     GAMES, SURFACE, TEXT, MUTED, CARD = ns['GAMES'], ns['SURFACE'], ns['TEXT'], ns['MUTED'], ns['CARD']
-    NAME, PORT_DIR, game_info = ns['NAME'], ns['PORT_DIR'], ns['game_info']
-    from uncharted_widgets import PillButton
+    NAME, PORT_DIR, game_info, GOLD = ns['NAME'], ns['PORT_DIR'], ns['game_info'], ns['GOLD']
+    from uncharted_widgets import PillButton, rounded_image
 
-    class SteamButton(PillButton):
-        """A pill button with the Steam logo before its text."""
+    class IconButton(PillButton):
+        """A pill button with an icon (launcher/icons) before its text."""
+
+        def __init__(self, *args, icon_name='steam', **kwargs):
+            self.icon_name = icon_name
+            super().__init__(*args, **kwargs)
 
         def draw(self):
             import tkinter.font as tkfont
@@ -269,15 +339,72 @@ def launcher_class(base, ns):
             disabled = self.state != 'normal'
             fill = self.colors['button_hi'] if self.hover and not disabled else self.colors['button']
             fg = self.colors['muted'] if disabled else self.colors['text']
-            from uncharted_widgets import rounded_image
             c.delete('all')
             c.create_image(0, 0, anchor='nw', image=rounded_image(w, h, h // 2, fill, self.bg))
-            self._logo = ImageTk.PhotoImage(steam_logo(size, fg, fill))
+            self._icon = ImageTk.PhotoImage(icon_image(self.icon_name, size, fg, fill))
             x = w // 2 - (text_w + size + gap) // 2
-            c.create_image(x, h // 2, anchor='w', image=self._logo)
+            c.create_image(x, h // 2, anchor='w', image=self._icon)
             c.create_text(x + size + gap, h // 2, text=self.text, anchor='w', fill=fg, font=self.font)
 
+    LAUNCH_TEXTS = (_('Preparing the game; it opens in its own window…'), _('The game is running.'),
+                    _('Starting the next game of the collection…'))
+
     class LinuxLauncher(base):
+        def build(self):
+            super().build()
+            # "Launching…" for every step of starting a game.
+            configure = self.status.configure
+
+            def status(**kw):
+                if kw.get('text') in LAUNCH_TEXTS:
+                    kw['text'] = _('Launching…')
+                return configure(**kw)
+            self.status.configure = self.status.config = status
+            # The GitHub mark (this fork's repository) instead of the note in the sidebar.
+            from PIL import ImageTk
+            self._github = ImageTk.PhotoImage(icon_image('github', self.px(26), MUTED, ns['BG']))
+            self.side_note.configure(text='', image=self._github, cursor='hand2')
+            self.side_note.bind('<Button-1>', lambda _e: open_path(REPO_URL))
+            self.side_note.bind('<Enter>', lambda _e: self.side_note.configure(
+                image=self._github_hot) if hasattr(self, '_github_hot') else None)
+            self._github_hot = ImageTk.PhotoImage(icon_image('github', self.px(26), TEXT, ns['BG']))
+            self.side_note.bind('<Leave>', lambda _e: self.side_note.configure(image=self._github))
+
+        def style(self):
+            super().style()
+            # Dropdowns with round ends, like the buttons (clam draws square ones).
+            from PIL import Image, ImageDraw, ImageTk
+            h = self.px(30)
+            r = h // 2
+            images = []
+            for color in (ns['CARD_HI'], ns['GOLD_DIM']):
+                # Opaque corners in the card colour behind the dropdowns: Tk fills transparent
+                # pixels of an element image with the widget's own (field) colour.
+                image = Image.new('RGB', (h * 4 * 2, h * 4), CARD)
+                ImageDraw.Draw(image).rounded_rectangle((0, 0, h * 8 - 1, h * 4 - 1), r * 4, fill=color)
+                images.append(ImageTk.PhotoImage(image.resize((h * 2, h), Image.LANCZOS)))
+            self._field_images = images
+            s = self.ttk.Style(self.root)
+            try:
+                s.element_create('Round.field', 'image', images[0], ('focus', images[0]),
+                                 border=(r, r // 2, r, r // 2), sticky='nswe')
+            except self.tk.TclError:
+                pass
+            s.layout('TCombobox', [('Round.field', {'sticky': 'nswe', 'children': [
+                ('Combobox.downarrow', {'side': 'right', 'sticky': 'ns'}),
+                ('Combobox.padding', {'expand': '1', 'sticky': 'nswe', 'children': [
+                    ('Combobox.textarea', {'sticky': 'nswe'})]})]})])
+            s.configure('TCombobox', arrowcolor=GOLD, background=ns['CARD_HI'], bordercolor=ns['CARD_HI'],
+                        lightcolor=ns['CARD_HI'], darkcolor=ns['CARD_HI'], padding=(self.px(4), 2))
+
+        def page(self, name, title, subtitle):
+            f = super().page(name, title, subtitle)
+            if name == 'display':
+                self.check(f, 'steam_deck', _('Steam Deck mode'),
+                           _('30 FPS at the Deck\'s 1280 × 800, for a steady frame rate on the Steam Deck. '
+                             'On by default on SteamOS.'))
+            return f
+
         def build_play(self):
             tk = self.tk
             page = tk.Frame(self.content, bg=SURFACE)
@@ -285,10 +412,7 @@ def launcher_class(base, ns):
             self.cards, self.card_images = {}, {}
             self.game_rows = {}
             shell = tk.Frame(page, bg=SURFACE)
-            shell.pack(fill='both', expand=True, padx=self.px(44), pady=(self.px(30), self.px(10)))
-            tk.Label(shell, text=_('Library'), bg=SURFACE, fg=TEXT, font=self.font_title).pack(anchor='w')
-            tk.Label(shell, text=_('One game folder holds the whole collection. Pick a game to play.'),
-                     bg=SURFACE, fg=MUTED, font=self.font_ui_sm).pack(anchor='w', pady=(self.px(4), self.px(18)))
+            shell.pack(fill='both', expand=True, padx=self.px(44), pady=(self.px(36), self.px(10)))
             for number, (key, title, _subtitle, exe) in enumerate(GAMES, start=1):
                 row = tk.Frame(shell, bg=CARD, highlightthickness=0)
                 row.pack(fill='x', pady=(0, self.px(10)))
@@ -301,18 +425,20 @@ def launcher_class(base, ns):
                 play = self.pill(row, _('Play'), lambda k=key: self.play_game(k), kind='primary',
                                  background=CARD, padding=(26, 8))
                 play.pack(side='right', padx=(self.px(8), self.px(18)))
-                steam = SteamButton(self.tk, row, _('Add to Steam'), lambda k=key: self.add_game_to_steam(k),
-                                    ns['COLORS'], self.px, self.font_button, 'secondary', CARD, (16, 8))
+                shortcut = self.pill(row, _('Desktop shortcut'), lambda k=key: self.game_shortcut(k),
+                                     background=CARD, padding=(14, 8))
+                shortcut.pack(side='right', padx=(self.px(8), 0))
+                steam = IconButton(self.tk, row, _('Add to Steam'), lambda k=key: self.add_game_to_steam(k),
+                                   ns['COLORS'], self.px, self.font_button, 'secondary', CARD, (16, 8),
+                                   icon_name='steam')
                 steam.pack(side='right')
-                self.game_rows[key] = (play, steam, note, exe)
+                self.game_rows[key] = (play, steam, shortcut, note, exe)
             row = tk.Frame(shell, bg=SURFACE)
             row.pack(fill='x', pady=(self.px(14), self.px(8)))
             self.toggle(row, self.var('fullscreen'), SURFACE).pack(side='left')
             fullscreen = tk.Label(row, text=_('Fullscreen'), bg=SURFACE, fg=TEXT, font=self.font_ui, cursor='hand2')
             fullscreen.pack(side='left', padx=(self.px(10), 0))
             fullscreen.bind('<Button-1>', lambda _e: self.var('fullscreen').set(not self.var('fullscreen').get()))
-            self.pill(row, _('Desktop shortcut'), self.shortcut, background=SURFACE, padding=(14, 6)).pack(
-                side='left', padx=(self.px(24), 0))
             self.ready = tk.Label(shell, text='', bg=SURFACE, fg=MUTED, font=self.font_ui_sm,
                                   wraplength=self.px(820), justify='left')
             self.ready.pack(anchor='w', pady=(0, self.px(16)))
@@ -320,11 +446,11 @@ def launcher_class(base, ns):
         def refresh(self):
             super().refresh()
             info = self.info
-            for key, (play, steam, note, exe) in getattr(self, 'game_rows', {}).items():
+            for key, (play, steam, shortcut, note, exe) in getattr(self, 'game_rows', {}).items():
                 present = bool(info) and key in info['games']
-                state = 'normal' if present and not self.process else 'disabled'
-                play.configure(state=state)
-                steam.configure(state='normal' if present else 'disabled')
+                play.configure(state='normal' if present and not self.process else 'disabled')
+                for button in (steam, shortcut):
+                    button.configure(state='normal' if present else 'disabled')
                 if not info:
                     note.configure(text=_('Choose the game folder on the Game page'))
                 elif present:
@@ -346,10 +472,30 @@ def launcher_class(base, ns):
                 return False
             return True
 
+        def game_name(self, key):
+            number, title = next((n, t) for n, (k, t, _s, _e) in enumerate(GAMES, start=1) if k == key)
+            return f'Uncharted {number}: {title}'
+
         def play_game(self, key):
             if self.available(key):
                 self.var('start').set(key)
                 self.play()
+
+        def play(self):
+            if not self.process:
+                rotate_logs(Path(self.app.get('user_dir') or ns['DATA_DIR'] / 'user'))
+            super().play()
+
+        def game_shortcut(self, key):
+            if not self.available(key):
+                return
+            try:
+                desktop_game_entry(ns['__file__'], key, self.game_name(key))
+            except OSError as error:
+                self.messagebox.showerror(NAME, str(error))
+                return
+            self.messagebox.showinfo(NAME, _('{} is in the application menu and on the desktop.').format(
+                self.game_name(key)))
 
         # No artwork on this page.
         def draw_hero(self):
@@ -371,7 +517,7 @@ def launcher_class(base, ns):
             if self.update_box or not os.environ.get('APPIMAGE') or not url:
                 return super().offer_update(version, url, page)
             self.update_box = 'downloading'
-            self.status.configure(text=_('Downloading version {}…').format(version), fg=ns['GOLD'])
+            self.status.configure(text=_('Downloading version {}…').format(version), fg=GOLD)
 
             def work():
                 try:
@@ -391,15 +537,14 @@ def launcher_class(base, ns):
             tk = self.tk
             box = tk.Frame(self.side, bg=CARD, highlightthickness=1, highlightbackground=ns['GOLD_DIM'])
             tk.Label(box, text=_('Version {} is installed. Restart to use it.').format(version), bg=CARD,
-                     fg=ns['GOLD'], font=self.font_ui_md, wraplength=self.px(190), justify='left').pack(
+                     fg=GOLD, font=self.font_ui_md, wraplength=self.px(190), justify='left').pack(
                 anchor='w', padx=12, pady=(10, 8))
             self.pill(box, _('Restart'), self.restart_updated, kind='primary', padding=(14, 6)).pack(
                 anchor='w', padx=12, pady=(0, 12))
             box.pack(fill='x', padx=18, pady=(0, 14), before=self.side_note)
             self.update_box = box
             if not self.process:
-                self.status.configure(text=_('Version {} is installed. Restart to use it.').format(version),
-                                      fg=ns['GOLD'])
+                self.status.configure(text=_('Version {} is installed. Restart to use it.').format(version), fg=GOLD)
 
         def restart_updated(self):
             if self.process:
@@ -428,8 +573,7 @@ def launcher_class(base, ns):
             if not configs:
                 self.messagebox.showerror(NAME, _('Steam was not found on this PC (or nobody has signed in to it yet).'))
                 return
-            number, title = next((n, t) for n, (k, t, _s, _e) in enumerate(GAMES, start=1) if k == key)
-            name = f'Uncharted {number}: {title}'
+            name = self.game_name(key)
             restart = False
             if steam_running():
                 if not self.messagebox.askyesno(NAME, _('Steam has to close while the game is added; it starts '

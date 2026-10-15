@@ -28,7 +28,7 @@ out/pyenv/bin/python -m PyInstaller --noconfirm --clean --log-level WARN --windo
     --name Uncharted --distpath out/pyi-dist --workpath out/pyi-work --specpath out/pyi-work \
     --paths "$PWD/scripts" --paths "$PWD/launcher" \
     --add-data "$PWD/launcher/fonts:fonts" --add-data "$PWD/launcher/covers:covers" \
-    --add-data "$PWD/launcher/uncharted.png:." \
+    --add-data "$PWD/launcher/uncharted.png:." --add-data "$PWD/launcher/icons:icons" \
     "${hidden[@]}" launcher/uncharted_launcher.py
 
 dest=out/stage/uncharted-linux
