@@ -114,6 +114,29 @@ static int make_dirs(const char *path) {
 static void root(int32_t user, const char *title, char *out, size_t size) {
     snprintf(out,size,"%s/savedata/%d/%s",runtime_file_user_dir(),user,title && *title ? title : title_id);
 }
+/* Linux fork: BB_SAVEDATA_DIRS="SAVEDATA01=Uncharted 1;SAVEDATA02=Uncharted 2;..." keeps the
+ * save directories whose names start with a prefix in their own folder of the user directory
+ * (<user>/Uncharted 1/SAVEDATA01P), whichever executable mounts them. Others stay in root(). */
+static int mapped_folder(const char *name, int index, char *out, size_t size) {
+    const char *spec=getenv("BB_SAVEDATA_DIRS");
+    for (int i=0; spec && *spec; ++i) {
+        const char *end=strchr(spec,';'), *eq=strchr(spec,'=');
+        size_t len=end ? (size_t)(end-spec) : strlen(spec);
+        if (eq && eq<spec+len) {
+            size_t prefix=(size_t)(eq-spec);
+            if (name ? !strncmp(name,spec,prefix) : i==index) {
+                snprintf(out,size,"%s/%.*s",runtime_file_user_dir(),(int)(len-prefix-1),eq+1);
+                return 1;
+            }
+        }
+        if (!end) break;
+        spec=end+1;
+    }
+    return 0;
+}
+static void dir_root(int32_t user, const char *title, const char *name, char *out, size_t size) {
+    if (!mapped_folder(name,-1,out,size)) root(user,title,out,size);
+}
 static int valid_name(const char *name, size_t max) {
     size_t n=strnlen(name,max);
     if (!n || n==max) return 0;
@@ -154,7 +177,7 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     if (user<0) return ERR_INVALID_USER;
     if (!dir || !result || !valid_name(dir->data,sizeof(dir->data))) return ERR_PARAMETER;
     char base[600], host[640], meta[680];
-    root(user,title,base,sizeof(base));
+    dir_root(user,title,dir->data,base,sizeof(base));
     snprintf(host,sizeof(host),"%s/%s",base,dir->data);
     snprintf(meta,sizeof(meta),"%s/%s.sce_sys",base,dir->data);
     struct stat st;
@@ -247,7 +270,7 @@ static ABI int32_t save_delete(const Delete *d) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     if (!d || !d->dir || !valid_name(d->dir->data,sizeof(d->dir->data))) return ERR_PARAMETER;
     char base[600], host[640], meta[680];
-    root(d->user,d->title ? d->title->data : NULL,base,sizeof(base));
+    dir_root(d->user,d->title ? d->title->data : NULL,d->dir->data,base,sizeof(base));
     snprintf(host,sizeof(host),"%s/%s",base,d->dir->data);
     snprintf(meta,sizeof(meta),"%s/%s.sce_sys",base,d->dir->data);
     struct stat st;
@@ -271,6 +294,7 @@ int runtime_savedata_pick(int32_t user, const char *title, const char (*names)[3
         char name[33]; memcpy(name,names[i],32); name[32]=0;
         if (!valid_name(name,sizeof(name))) continue;
         char host[640], meta[680];
+        dir_root(user,title,name,base,sizeof(base));
         snprintf(host,sizeof(host),"%s/%s",base,name);
         snprintf(meta,sizeof(meta),"%s/%s.sce_sys",base,name);
         struct stat st;
@@ -304,20 +328,26 @@ static ABI int32_t save_search(const SearchCond *cond, SearchResult *result) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     if (!cond || !result) return ERR_PARAMETER;
     char base[600];
-    root(cond->user,cond->title ? cond->title->data : NULL,base,sizeof(base));
     Entry *entries=NULL; size_t count=0, capacity=0;
-    DIR *d=opendir(base);
-    for (struct dirent *e; d && (e=readdir(d));) {
-        size_t n=strlen(e->d_name);
-        if (e->d_name[0]=='.' || n>=32 || (n>8 && !strcmp(e->d_name+n-8,".sce_sys"))) continue;
-        if (cond->dir && cond->dir->data[0] && !like(e->d_name,cond->dir->data)) continue;
-        if (count==capacity) { capacity=capacity ? capacity*2 : 16; entries=realloc(entries,capacity*sizeof(*entries)); }
-        snprintf(entries[count].name,32,"%s",e->d_name);
-        char meta[680]; snprintf(meta,sizeof(meta),"%s/%s.sce_sys",base,e->d_name);
-        read_param(meta,&entries[count].param);
-        ++count;
+    for (int folder=-1;;++folder) {  /* root(), then each BB_SAVEDATA_DIRS folder */
+        if (folder<0) root(cond->user,cond->title ? cond->title->data : NULL,base,sizeof(base));
+        else if (!mapped_folder(NULL,folder,base,sizeof(base))) break;
+        DIR *d=opendir(base);
+        for (struct dirent *e; d && (e=readdir(d));) {
+            size_t n=strlen(e->d_name);
+            if (e->d_name[0]=='.' || n>=32 || (n>8 && !strcmp(e->d_name+n-8,".sce_sys"))) continue;
+            if (cond->dir && cond->dir->data[0] && !like(e->d_name,cond->dir->data)) continue;
+            char home[600];  /* listed only where it belongs (no duplicates) */
+            dir_root(cond->user,cond->title ? cond->title->data : NULL,e->d_name,home,sizeof(home));
+            if (strcmp(home,base)) continue;
+            if (count==capacity) { capacity=capacity ? capacity*2 : 16; entries=realloc(entries,capacity*sizeof(*entries)); }
+            snprintf(entries[count].name,32,"%s",e->d_name);
+            char meta[680]; snprintf(meta,sizeof(meta),"%s/%s.sce_sys",base,e->d_name);
+            read_param(meta,&entries[count].param);
+            ++count;
+        }
+        if (d) closedir(d);
     }
-    if (d) closedir(d);
     sort_key=cond->key; sort_order=cond->order;
     if (count) qsort(entries,count,sizeof(*entries),compare);
     result->hits=(uint32_t)count;

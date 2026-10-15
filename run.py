@@ -75,6 +75,29 @@ def find_executable(name):
     return None
 
 
+# Linux fork: each game's saves in its own folder of the saves directory, by save name prefix
+# (runtime_savedata.c), whichever executable (the collection menu or the game) mounts them.
+SAVE_FOLDERS = {'SAVEDATA01': 'Uncharted 1', 'SAVEDATA02': 'Uncharted 2', 'SAVEDATA03': 'Uncharted 3'}
+
+
+def split_saves(user_dir):
+    """Moves saves from the shared savedata/<user>/<title>/ into the per-game folders, once."""
+    import shutil
+    for title in user_dir.glob('savedata/*/*'):
+        if not title.is_dir() or title.name.endswith('.memory'):
+            continue
+        for entry in sorted(title.iterdir()):
+            prefix = entry.name[:10]
+            if prefix not in SAVE_FOLDERS:
+                continue
+            target = user_dir / SAVE_FOLDERS[prefix] / entry.name
+            if target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(entry), str(target))
+            print(f'Saves: moved {entry.name} to {target.parent.name}/')
+
+
 def executable_name(value):
     return EXECUTABLES.get(value.lower(), value) if value else EXECUTABLES['u1']
 
@@ -143,12 +166,22 @@ def main():
     exe = executable_name(env.get('BB_EXE', ''))
     user_dir = Path(env.get('BB_USER_DIR', data / 'user')).resolve()
     user_dir.mkdir(parents=True, exist_ok=True)
+    if not WINDOWS and env.get('BB_SAVEDATA_DIRS') is None:
+        env['BB_SAVEDATA_DIRS'] = ';'.join(f'{k}={v}' for k, v in SAVE_FOLDERS.items())
+        split_saves(user_dir)
     # GPU caches (shaders, pipelines) beside the saves; read before main(), so set here.
     env.setdefault('BB_GPU_USER_DIR', str(user_dir))
     env.setdefault('BB_VBLANK_HZ', '60')
     loadexec = out_root / 'loadexec.txt'
     env['BB_LOADEXEC_FILE'] = str(loadexec)
     guest_argv = None
+    # Linux fork, experiment: BB_U1_DIRECT=1 starts eboot.bin the way the collection menu starts
+    # a game (arguments eboot.bin ispartofuccollection), to boot Uncharted 1 past the menu.
+    if exe == EXECUTABLES['u1'] and env.get('BB_U1_DIRECT') == '1':
+        guest_argv = out_root / 'guest-argv.txt'
+        out_root.mkdir(parents=True, exist_ok=True)
+        guest_argv.write_text('/app0/eboot.bin\neboot.bin\nispartofuccollection\n', encoding='utf-8')
+        print('Starting eboot.bin as part of the collection (BB_U1_DIRECT=1)')
     while True:
         if not (game / exe).is_file():
             fail(f'No {exe} in {game}.')
