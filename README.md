@@ -1,10 +1,10 @@
 # Uncharted: The Nathan Drake Collection for Linux/Steam Deck
+**WORK IN PROGRESS: GAMES HAVE NOT BEEN CONFIRMED TO BE FULLY PLAYABLE. DISTRIBUTIONS TESTED: SteamOS 3.7, Fedora 44**
+
 
 Join the Discord: https://discord.gg/X2YhSJg6R2
 
 **Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).**
-
-**DISTRIBUTIONS TESTED: SteamOS 3.7, Fedora 44**
 
 Status: Early, expect minor graphical issues and some crashes. Steam Deck running at stable 28-30fps by using Steam Deck mode. 
 
