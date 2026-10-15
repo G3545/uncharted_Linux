@@ -6,9 +6,7 @@ Join the Discord: https://discord.gg/X2YhSJg6R2
 
 **DISTRIBUTIONS TESTED: SteamOS 3.7, Fedora 44**
 
-This fork builds SuperMedo's Windows port for Linux and the Steam Deck.
-
-Status: Early, expect minor graphical issues and some crashes. Steam Deck running at stable 28-30fps currently.
+Status: Early, expect minor graphical issues and some crashes. Steam Deck running at stable 28-30fps by using Steam Deck mode. 
 
 ## Install
 
@@ -21,21 +19,19 @@ curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main
 `curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main/install.sh | sh -s -- --uninstall`.
 Saves and settings go to `~/.local/share/uncharted-linux` 
 
-Appimage:
+## Appimage
 1. Download **[Uncharted-x86_64.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage)**.
 2. Right-click it, open **Properties → Permissions** and tick **Is executable** (or
    **Allow executing file as program**).
 3. Double-click it.
 
-**First start:** choose your game folder on the **Game** page, then press **Play** next to a game.
+## How to Play 
 
-You can also press **Add to Steam** next to each game instead. Steam restarts and the game
-appears in your library as a Non-Steam game. On Steam Deck, go back to Gaming Mode and play it from there. It
-uses the settings saved in the launcher. The buttons only work for games whose files are in the
-game folder.
+You must have an unencryped extracted dump of the Uncharted: The Nathan Drake Collection (CUSA02320) v1.00.
 
-**Your game files:** copy the dump folder to the Deck or PC, for example `~/Games/CUSA02343`.
-A microSD card works too (`/run/media/deck/<card>/...`).
+Point the launcher to this folder in the Game tab. By default, a new Saves folder will appear.
+
+Once your game folder has been specified, you're ready to play either by clicking Play, Add to Steam (recommended for Steam Deck) or create a Desktop shortcut.
 
 > **No game files are included.** You need your own decrypted dump of the collection
 > (CUSA02343, CUSA02320, ...: the folder with eboot.bin, big2-ps4_Shipping.elf,
@@ -50,7 +46,6 @@ A microSD card works too (`/run/media/deck/<card>/...`).
 - Frame generation: AMD FSR 3 (any GPU).
 - Keyboard, mouse and controller together, all remappable. Mouse look in U3.
 - Each game can be added to Steam individually
-- 
 
 ## Requirements
 
