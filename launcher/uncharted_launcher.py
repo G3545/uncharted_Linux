@@ -1649,6 +1649,8 @@ def main():
     if not WINDOWS:
         uncharted_linux.apply_defaults(globals())
     settings = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
+    if not WINDOWS:  # Linux fork: an empty saves folder is <game folder>/Saves
+        uncharted_linux.default_saves(settings, DATA_DIR)
     if '--play' in args and (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file():
         # Linux fork: `--play u2` starts that game (one Steam entry per game); the update check
         # runs beside the game (Gaming Mode never opens the launcher); earlier logs are kept.

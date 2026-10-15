@@ -275,6 +275,17 @@ def apply_defaults(ns):
         ns['FRAME_RATES'].insert(0, ('30', '30 FPS (Steam Deck)'))
 
 
+def default_saves(settings, data_dir):
+    """An empty saves folder means <game folder>/Saves (kept beside the game, like a console's
+    save directory), unless the old default (<data>/user) already holds saves."""
+    if settings.get('user_dir') or not settings.get('game_dir'):
+        return
+    old = Path(data_dir) / 'user'
+    if any((old / name).exists() for name in ('savedata', 'Uncharted 1', 'Uncharted 2', 'Uncharted 3')):
+        return
+    settings['user_dir'] = str(Path(settings['game_dir']) / 'Saves')
+
+
 def deck_environment(settings, env):
     """Steam Deck mode: what the Deck needs to hold 30 FPS. Applied before the player's own
     Environment entries, which can override any of it."""
@@ -453,6 +464,15 @@ def launcher_class(base, ns):
             self.ready = tk.Label(shell, text='', bg=SURFACE, fg=MUTED, font=self.font_ui_sm,
                                   wraplength=self.px(820), justify='left')
             self.ready.pack(anchor='w', pady=(0, self.px(16)))
+
+        def collect(self):
+            for key, var in self.vars.items():
+                self.app[key] = var.get()
+            before = self.app.get('user_dir')
+            default_saves(self.app, ns['DATA_DIR'])
+            if self.app.get('user_dir') != before and 'user_dir' in self.vars:
+                self.vars['user_dir'].set(self.app['user_dir'])  # the Game page shows it
+            super().collect()
 
         def refresh(self):
             super().refresh()
