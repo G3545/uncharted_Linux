@@ -36,11 +36,11 @@ curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main
 
 This client ships with a built in updater that can be toggled on/off, and updates from two sources: the main repo & this fork. 
 
-If opening the launcher itself, you'll see available updates in the bottom left of the launcher.
-<img width="517" height="124" alt="image" src="https://github.com/user-attachments/assets/911e9ded-29b0-465b-8c18-5f589e987063" />
+- If opening the launcher itself, you'll see available updates in the bottom left of the launcher.
+<img width="400" height="98" alt="image" src="https://github.com/user-attachments/assets/911e9ded-29b0-465b-8c18-5f589e987063" />
 
-If launching one of the games through Steam or Game Mode (Steam Deck), you will be prompted with an update screen if one is available.
-<img width="700" height="300" alt="image" src="https://github.com/user-attachments/assets/b8c1b51d-fee3-42b8-a200-edb5d8c8712e" />
+- If launching one of the games through Steam or Game Mode (Steam Deck), you will be prompted with an update screen if one is available.
+<img width="400" height="200" alt="image" src="https://github.com/user-attachments/assets/b8c1b51d-fee3-42b8-a200-edb5d8c8712e" />
 
 
 ## Steam Deck
