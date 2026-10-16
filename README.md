@@ -1,15 +1,19 @@
 # Uncharted: The Nathan Drake Collection for Linux/Steam Deck
-**WORK IN PROGRESS**
+**WORK IN PROGRESS. READ BELOW FOR CURRENT PROGRESS ON EACH GAME**
 
-Join the Discord: https://discord.gg/X2YhSJg6R2
+👾Join the Discord: https://discord.gg/X2YhSJg6R2
 
 **Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).**
 
-Uncharted 1: Ingame, seems stable. Unconfirmed if fully playable
+**This client is a launcher that allows you to directly launch Uncharted 1-3, add to your desktop or add to your Steam Library. This fork features auto-updates, a modified save system and a Steam Deck mode that optimizes playback for Steam Deck.**
+<img width="700" height="500" alt="image" src="https://github.com/user-attachments/assets/361582f1-7221-4f99-9a67-1748343836ad" />
 
-Uncharted 2: Ingame, some physics glitches. Unconfirmed if fully playable
 
-Uncharted 3: Crashes often. Not yet fully playable
+⚠️Uncharted 1: Ingame, seems stable. Unconfirmed if fully playable
+
+⚠️Uncharted 2: Ingame, some physics glitches. Unconfirmed if fully playable
+
+❌Uncharted 3: Crashes often. Not yet fully playable
 
 ## Install
 
@@ -46,51 +50,14 @@ Once your game folder has been specified: Play, Add to Steam (recommended for St
 > big3-ps4_Shipping.elf, sce_sys, u1data, u2data and u3data).
 > This project is not affiliated with Sony Interactive Entertainment or Naughty Dog.
 
-
 ## System Requirements
 
 - 64-bit x86 Linux with glibc 2.41 or newer: SteamOS 3.7+, Debian 13, Ubuntu 25.04, Fedora 42,
   Arch, or anything newer.
-- A graphics card with Vulkan 1.3 and a current driver, with **6 GB of video memory or more**.
+- A graphics card with Vulkan 1.3 with 6 GB of video memory or more.
   4 GB cards (GTX 1650, RX 570) run out of video memory and crash after a while; on those, keep
-  Anti-aliasing and Frame generation off. (The Steam Deck shares its memory and is fine.)
-- About 8 GB of free memory (RAM + page file).
-
-## Known upstream problems
-
-- **Uncharted 3, Cartagena square (chapter 2):** at high frame rates (240 Hz setting, ~80 FPS)
-  the game could freeze and close with "GPU crash: the graphics device was lost". It came from
-  the speed fix for that area and is fixed in 0.3. If it still happens to you, set Frame rate to
-  60 on the Display page and open an issue with your `user/last_run.log`.
-- **Uncharted 3:** green or black shapes flash for a single frame on some characters (Sully's
-  shirt in Cartagena). It happens in shadPS4 too, so it's a shader translation problem. Not fixed yet.
-- **Crash with "ASSERTION: GetRenderFrameParams(frameToFreeInstancesFor)->m_gfxEopTick"**
-  (mostly U1 after the first cutscene): the game expected the GPU side to be done with a frame it
-  wanted to reuse, and stopped when it wasn't yet (shaders building on a first run). Fixed in
-  0.3.2: the game now waits for it. If you still see it, open an issue with your log.
-- **Intel HD / UHD graphics:** a black screen on the HD 630 is fixed in 0.3.3. Older Intel chips
-  (HD 520) can still crash inside Intel's own driver.
-- **Uncharted 2 streaming crash** (`iSubMesh < m_numSubMeshInstances`, white textures first) and the
-  **Uncharted 3 London bar crash** (fault at `0xd9c59b`): both seen on the US version 1.02
-  (CUSA02320). Being looked at.
-- Frame rates above 120 are experimental.
-
-## Building from source
-
-On Debian 13 or Ubuntu 25.04 (other distributions need the same packages under their own names):
-
-```sh
-sudo apt install build-essential cmake ninja-build pkgconf curl python3 python3-venv python3-tk \
-  libsdl3-dev libvulkan-dev libfmt-dev libboost-dev robin-map-dev libvulkan-memory-allocator-dev \
-  libxxhash-dev libx11-dev libzydis-dev libavformat-dev libavcodec-dev libavutil-dev \
-  libswscale-dev libswresample-dev libprotobuf-dev protobuf-compiler nlohmann-json3-dev \
-  libssl-dev zlib1g-dev libminiupnpc-dev glslang-tools spirv-headers
-git clone --recursive https://github.com/spacepepperoni/uncharted_Linux
-cd uncharted_Linux
-bash build.sh                      # BB_JOBS=4 limits parallel jobs; BB_LTO=OFF builds faster
-python3 launcher/uncharted_launcher.py
-bash packaging/linux/package.sh    # optional: the AppImage and the tarball in dist/
-```
+  Anti-aliasing and Frame generation off.
+- About 8 GB of free RAM
 
 
 ## Credits
