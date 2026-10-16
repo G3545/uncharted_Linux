@@ -1,12 +1,15 @@
 # Uncharted: The Nathan Drake Collection for Linux/Steam Deck
-**WORK IN PROGRESS: GAMES HAVE NOT BEEN CONFIRMED TO BE FULLY PLAYABLE. DISTRIBUTIONS TESTED: SteamOS 3.7, Fedora 44**
-
+**WORK IN PROGRESS**
 
 Join the Discord: https://discord.gg/X2YhSJg6R2
 
 **Uncharted 1, 2 and 3 from the PS4 collection running natively on Linux, forked by spacepepperoni from [SuperMedo](https://github.com/Supermedo).**
 
-Status: Early, expect minor graphical issues and some crashes. Steam Deck running at stable 28-30fps by using Steam Deck mode. 
+Uncharted 1: Ingame, seems stable. Unconfirmed if fully playable
+
+Uncharted 2: Ingame, some physics glitches. Unconfirmed if fully playable
+
+Uncharted 3: Crashes often. Not yet fully playable
 
 ## Install
 
@@ -24,28 +27,27 @@ curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main
 1. Download **[Uncharted-x86_64.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage)**.
 2. Right-click it, open **Properties → Permissions** and tick **Is executable** (or
    **Allow executing file as program**).
-3. Double-click it.
 
-## How to Play 
+## Steam Deck
+- For Steam Deck, it is recommended to install the [.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage) and add the games to Steam to play in Game Mode. 
+- In the Display tab, a Steam Deck mode is auto-selected if you are on SteamOS. With this enabled, expect an average of 25-30fps with occasional dips during demanding segments.
+- It is recommended to set your FPS cap to 30fps on the Steam Deck power menu.
+
+## Files needed 
 
 You must have an unencrypted extracted dump of the Uncharted: The Nathan Drake Collection (CUSA02320) v1.00.
 
-Point the launcher to this folder in the Game tab. By default, a new Saves folder will appear.
+Point the launcher to this folder in the Game tab. By default, a new Saves folder will appear within your Game folder.
 
-Once your game folder has been specified, you're ready to play either by clicking Play, Add to Steam (recommended for Steam Deck) or create a Desktop shortcut.
+Once your game folder has been specified: Play, Add to Steam (recommended for Steam Deck) or create a Desktop shortcut.
 
 > **No game files are included.** You need your own decrypted dump of the collection
 > (CUSA02343, CUSA02320, ...: the folder with eboot.bin, big2-ps4_Shipping.elf,
 > big3-ps4_Shipping.elf, sce_sys, u1data, u2data and u3data).
 > This project is not affiliated with Sony Interactive Entertainment or Naughty Dog.
 
-## Steam Deck
 
-- In the Display tab, a Steam Deck mode is auto-selected if you are on SteamOS. With this enabled, expect an average of 25-30fps with occasional dips during demanding segments.
-- It is recommended to set your FPS cap to 30fps on the Steam Deck power menu.
-
-
-## Requirements
+## System Requirements
 
 - 64-bit x86 Linux with glibc 2.41 or newer: SteamOS 3.7+, Debian 13, Ubuntu 25.04, Fedora 42,
   Arch, or anything newer.
@@ -54,7 +56,7 @@ Once your game folder has been specified, you're ready to play either by clickin
   Anti-aliasing and Frame generation off. (The Steam Deck shares its memory and is fine.)
 - About 8 GB of free memory (RAM + page file).
 
-## Known problems
+## Known upstream problems
 
 - **Uncharted 3, Cartagena square (chapter 2):** at high frame rates (240 Hz setting, ~80 FPS)
   the game could freeze and close with "GPU crash: the graphics device was lost". It came from
