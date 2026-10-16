@@ -32,6 +32,17 @@ curl -fsSL https://raw.githubusercontent.com/spacepepperoni/uncharted_Linux/main
 2. Right-click it, open **Properties → Permissions** and tick **Is executable** (or
    **Allow executing file as program**).
 
+## Updates
+
+This client ships with a built in updater that can be toggled on/off, and updates from two sources: the main repo & this fork. 
+
+If opening the launcher itself, you'll see available updates in the bottom left of the launcher.
+<img width="517" height="124" alt="image" src="https://github.com/user-attachments/assets/911e9ded-29b0-465b-8c18-5f589e987063" />
+
+If launching one of the games through Steam or Game Mode (Steam Deck), you will be prompted with an update screen if one is available.
+<img width="700" height="300" alt="image" src="https://github.com/user-attachments/assets/b8c1b51d-fee3-42b8-a200-edb5d8c8712e" />
+
+
 ## Steam Deck
 - For Steam Deck, it is recommended to install the [.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage) and add the games to Steam to play in Game Mode. 
 - In the Display tab, a Steam Deck mode is auto-selected if you are on SteamOS. With this enabled, expect an average of 25-30fps with occasional dips during demanding segments.
