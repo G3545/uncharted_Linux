@@ -1590,6 +1590,8 @@ def latest_release():
     with urllib.request.urlopen(request, timeout=15) as response:
         release = json.load(response)
     version = '.'.join(re.findall(r'\d+', release['tag_name']))
+    if not WINDOWS:  # Linux fork: the whole tag (0.4-linux.57); uncharted_linux.version_key compares it
+        version = release['tag_name'].lstrip('v')
     url = next((asset['browser_download_url'] for asset in release.get('assets', [])
                 if (asset.get('name', '').lower().endswith('.zip') if WINDOWS  # Linux fork: the AppImage
                     else asset.get('name') == 'Uncharted-x86_64.AppImage')), None)
@@ -1664,7 +1666,13 @@ def main():
         if WINDOWS:
             sys.exit(play_without_window(settings))
         uncharted_linux.rotate_logs(Path(settings.get('user_dir') or DATA_DIR / 'user'))
-        updater = uncharted_linux.update_in_background(latest_release, version_tuple, VERSION, settings)
+        # Before the game: a newer release is offered in a prompt the controller can answer
+        # (Gaming Mode); after an update the game closes, to be started again.
+        answer = uncharted_linux.startup_update_prompt(settings, latest_release, VERSION, PORT_DIR)
+        if answer == 'updated':
+            sys.exit(0)
+        updater = uncharted_linux.update_in_background(latest_release, version_tuple, VERSION, settings) \
+            if answer == 'error' else None
         code = play_without_window(settings)
         if updater:
             updater.join(20)  # a download still running when the game ends gets a moment
