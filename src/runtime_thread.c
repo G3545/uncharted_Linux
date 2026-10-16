@@ -264,15 +264,7 @@ static void set_host_name(const char *name) {
  * for a fresh FPU state: flush to zero, denormals are zero) and the x87 control word 0x037f.
  * Off by default (the host's 0x1f80): tried against U3's exploding cloth bones, no change. */
 void runtime_set_guest_fpu(void) {
-#ifdef _WIN32
     static unsigned value=0;
-#else
-    /* Linux fork: the PS4's own FPU state by default, as the game's fibers already get it
-     * (sceFiber, FLAG_SET_FPU): threads and fibers used to compute with different denormal
-     * handling. Aimed at NPCs left high in the air in Uncharted 2 (chapter 5). BB_GUEST_MXCSR=1f80
-     * restores the host value. */
-    static unsigned value=0x9fc0;
-#endif
     static int once;
     if (!once) {
         const char *env=getenv("BB_GUEST_MXCSR");
