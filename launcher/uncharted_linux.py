@@ -7,6 +7,7 @@ the launcher only calls into this module where it would otherwise call a Windows
 import ctypes
 import ctypes.util
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -428,7 +429,9 @@ def load_with_neighbours(path):
         try:
             return ctypes.CDLL(str(path), mode=ctypes.RTLD_GLOBAL)
         except OSError as error:
-            missing = str(error).split(':')[0].strip()
+            # PyInstaller rewraps the loader's message; the original is the cause.
+            found = re.search(r'([^\s:/]+\.so[.\d]*): cannot open shared object', str(error.__cause__ or error))
+            missing = found.group(1) if found else path.name
             beside = path.parent / missing
             if missing == path.name or not beside.exists():
                 raise
@@ -826,6 +829,8 @@ def launcher_class(base, ns):
         def build_advanced(self):
             """Advanced: options for testing and the game's log."""
             f = self.page('advanced', _('Advanced'), _('Options for testing, and the log of the last run.'))
+            self.check(f, 'check_updates', _('Automatic updates'),
+                       _('Look for a new version when the launcher or a game starts, and offer to install it.'))
             self.check(f, 'close_on_play', _('Close the launcher when the game starts'))
             extra = self.ttk.Entry(f, textvariable=self.var('extra_env'), width=60)
             self.row(f, _('Environment'), extra, _('Extra variables for the game, NAME=value separated by spaces.'))
