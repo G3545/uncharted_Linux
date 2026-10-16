@@ -673,8 +673,7 @@ class Launcher:
                  anchor='w').pack(anchor='w', padx=18, pady=(1, 16))
         tk.Frame(side, bg=LINE, height=1).pack(fill='x', padx=18, pady=(0, 14))
         self.nav, self.nav_pills, self.nav_icons, self.nav_marks, self.current_page = {}, {}, {}, {}, None
-        for name, title in (('play', _('Play')), ('game', _('Game')), ('display', _('Display')),
-                            ('controls', _('Controls')), ('advanced', _('Advanced')), ('log', _('Log'))):
+        for name, title in self.nav_pages():
             row = tk.Frame(side, bg=BG, cursor='hand2')
             row.pack(fill='x', padx=(0, 12), pady=2)
             mark = tk.Frame(row, bg=BG, width=self.px(3))
@@ -736,6 +735,11 @@ class Launcher:
         self.build_advanced()
         self.build_log()
         self.refresh()
+
+    def nav_pages(self):
+        """The sidebar's pages (Linux fork: a subclass adds its own)."""
+        return [('play', _('Play')), ('game', _('Game')), ('display', _('Display')),
+                ('controls', _('Controls')), ('advanced', _('Advanced')), ('log', _('Log'))]
 
     def _nav_style(self, name, active=False, hover=False):
         if active:
