@@ -349,6 +349,7 @@ def apply_defaults(ns):
     for name in ('WINDOW_SIZES', 'ANTI_ALIASING'):
         ns[name][:] = [(value, text.replace("(the games' own)", '(Default)').replace("(the game's own)", '(Default)'))
                        for value, text in ns[name]]
+    ns['FRAME_RATES'][:] = [(value, '60 FPS (Default)' if value == '60' else text) for value, text in ns['FRAME_RATES']]
     if not any(value == '30' for value, _text in ns['FRAME_RATES']):
         ns['FRAME_RATES'].insert(0, ('30', '30 FPS (Steam Deck)'))
 
@@ -457,7 +458,6 @@ def launcher_class(base, ns):
             # No bottom bar: the games start from their own rows; status messages stay hidden.
             self.status.master.master.pack_forget()
             self.build_corner()
-            self.build_reset()
             self.root.after(3000, self.periodic_update_check)
 
         def nav_pages(self):
@@ -471,8 +471,8 @@ def launcher_class(base, ns):
             tk, bg = self.tk, ns['BG']
             labels = [w for w in self.side.winfo_children() if isinstance(w, tk.Label)][:5]
             title, line1, line2, author, version = labels
-            line1.configure(text='THE NATHAN DRAKE')
-            line2.configure(text='COLLECTION')
+            line1.configure(text='THE NATHAN DRAKE', fg=GOLD)
+            line2.configure(text='COLLECTION', fg=GOLD)
             port = tk.Frame(self.side, bg=bg)
             port.pack(anchor='w', padx=18, pady=(1, 0), after=line2)
             tk.Label(port, text='LINUX PORT', bg=bg, fg=GOLD, font=self.font_brand_sm).pack(side='left')
@@ -481,27 +481,27 @@ def launcher_class(base, ns):
             version.configure(text=_('Linux port by spacepepperoni'), fg=TEXT, font=self.font_ui_md)
             author.pack_configure(pady=(self.px(12), 0))
 
-        def build_reset(self):
-            """Reset to defaults, at the bottom right of the window."""
-            right = self.content.master
-            button = self.pill(right, _('Reset to defaults'), self.reset_defaults, background=SURFACE,
-                               padding=(14, 6))
-            button.canvas.place(relx=1.0, rely=1.0, x=-self.px(40), y=-self.px(16), anchor='se')
-            self.tk.Misc.lift(button.canvas)  # Canvas.lift() raises canvas items, not the widget
+        def folder(self, parent, key, title, prompt, hint=None, on_change=None):
+            """A folder row whose field shrinks to the window: Browse and Open stay on screen and a
+            long path scrolls inside the field."""
+            var = self.var(key)
+            card = self.target(parent)
+            holder = self.tk.Frame(card, bg=CARD)
 
-        def reset_defaults(self):
-            if not self.messagebox.askyesno(NAME, _('Reset all settings to their defaults? The game folder, '
-                                                    'the saves folder and your controls are kept.')):
-                return
-            keep = ('game_dir', 'user_dir', 'player_name', 'key_bindings', 'pad_bindings', 'reported_crash')
-            for key, value in ns['APP_DEFAULTS'].items():
-                if key in keep:
-                    continue
-                self.app[key] = value
-                if key in self.vars:
-                    self.vars[key].set(value)
-            self.collect()
-            self.refresh()
+            def browse():
+                chosen = self.filedialog.askdirectory(title=prompt, initialdir=var.get() or str(PORT_DIR))
+                if chosen:
+                    var.set(str(Path(chosen)))
+            self.pill(holder, _('Open'), lambda: self.open_path(var.get(), key), kind='ghost',
+                      padding=(12, 6)).pack(side='right', padx=(4, 0))
+            self.pill(holder, _('Browse…'), browse, padding=(14, 6)).pack(side='right', padx=(8, 0))
+            self.ttk.Entry(holder, textvariable=var, width=20).pack(side='left', fill='x', expand=True)
+            if on_change:
+                var.trace_add('write', lambda *_a: on_change())
+            self.row(parent, title, holder, hint)
+            holder.grid_configure(sticky='we')
+            card.columnconfigure(1, weight=1)
+            return holder
 
         def build_corner(self):
             """Bottom of the sidebar: the GitHub mark, the download button (grey: up to date;
@@ -648,8 +648,8 @@ def launcher_class(base, ns):
                 block.grid(row=r, column=0, sticky='we', pady=(self.px(4) if r else 0, self.px(10)))
                 tk.Label(block, text=f'{folder_name}: {title}', bg=CARD, fg=TEXT,
                          font=self.font_brand_md).grid(row=0, column=0, sticky='w')
-                tk.Label(block, text=str(folder), bg=CARD, fg=TEXT, font=self.font_ui_sm).grid(
-                    row=1, column=0, sticky='w')
+                tk.Label(block, text=str(folder), bg=CARD, fg=TEXT, font=self.font_ui_sm, justify='left',
+                         wraplength=self.px(560), anchor='w').grid(row=1, column=0, sticky='w')
                 tk.Label(block, text=info, bg=CARD, fg=MUTED, font=self.font_ui_sm).grid(
                     row=2, column=0, sticky='w')
                 self.pill(block, _('Open'), lambda d=folder: (d.mkdir(parents=True, exist_ok=True), open_path(d)),
