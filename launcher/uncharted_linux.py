@@ -342,10 +342,23 @@ def crash_report_url(signature, text):
     return f'{REPO_URL}/issues/new?{query}'
 
 
+def version_key(text):
+    """A comparable form of this fork's versions: the upstream version padded to four parts,
+    then the Linux build number ('0.4-linux.57' -> (0, 4, 0, 0, 57)). Joining all the digits, as
+    the Windows launcher does, compared 0.4-linux.57 above 0.4.1-linux.60."""
+    import re
+    match = re.match(r'v?(\d+(?:\.\d+)*)(?:-[a-z]+\.(\d+))?', (text or '').strip())
+    if not match:
+        return (0,)
+    upstream = [int(part) for part in match.group(1).split('.')][:4]
+    return tuple(upstream + [0] * (4 - len(upstream))) + (int(match.group(2) or 0),)
+
+
 def apply_defaults(ns):
     """Linux settings the Windows launcher does not have: Steam Deck mode (on by default on
     SteamOS) and a 30 FPS frame rate."""
     ns['APP_DEFAULTS'].setdefault('steam_deck', steam_deck())
+    ns['version_tuple'] = version_key  # the launcher's update check compares with it
     for name in ('WINDOW_SIZES', 'ANTI_ALIASING'):
         ns[name][:] = [(value, text.replace("(the games' own)", '(Default)').replace("(the game's own)", '(Default)'))
                        for value, text in ns[name]]
@@ -408,6 +421,214 @@ def update_in_background(latest_release, version_tuple, version, settings):
     return thread
 
 
+def load_with_neighbours(path):
+    """ctypes.CDLL of a bundled library whose dependencies sit beside it. Only the game process gets
+    that folder on its library path, so a missing dependency is loaded from there first."""
+    for _ in range(40):
+        try:
+            return ctypes.CDLL(str(path), mode=ctypes.RTLD_GLOBAL)
+        except OSError as error:
+            missing = str(error).split(':')[0].strip()
+            beside = path.parent / missing
+            if missing == path.name or not beside.exists():
+                raise
+            load_with_neighbours(beside)  # now loaded, the next attempt finds it by soname
+    raise OSError(f'{path}: too many missing dependencies')
+
+
+class Gamepads:
+    """The controller through SDL3 (bundled with the game: bin/lib/libSDL3.so.0), for the update
+    prompt shown before a game started from Steam. Steam's virtual gamepad is what a game launched
+    in Gaming Mode sees. Silently absent when SDL3 cannot be loaded."""
+    SOUTH, EAST, DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT = 0, 1, 11, 12, 13, 14
+
+    def __init__(self, port_dir):
+        self.sdl, self.pads, self.held, self.next_scan = None, [], set(), 0.0
+        try:
+            sdl = load_with_neighbours(Path(port_dir) / 'bin' / 'lib' / 'libSDL3.so.0')
+            sdl.SDL_SetHint.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+            sdl.SDL_SetHint(b'SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS', b'1')
+            sdl.SDL_Init.argtypes = [ctypes.c_uint32]
+            sdl.SDL_Init.restype = ctypes.c_bool
+            if not sdl.SDL_Init(0x00002000):  # SDL_INIT_GAMEPAD
+                return
+            sdl.SDL_GetGamepads.argtypes = [ctypes.POINTER(ctypes.c_int)]
+            sdl.SDL_GetGamepads.restype = ctypes.POINTER(ctypes.c_uint32)
+            sdl.SDL_OpenGamepad.argtypes = [ctypes.c_uint32]
+            sdl.SDL_OpenGamepad.restype = ctypes.c_void_p
+            sdl.SDL_GetGamepadButton.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            sdl.SDL_GetGamepadButton.restype = ctypes.c_bool
+            sdl.SDL_GetGamepadAxis.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            sdl.SDL_GetGamepadAxis.restype = ctypes.c_int16
+            sdl.SDL_free.argtypes = [ctypes.c_void_p]
+            self.sdl = sdl
+        except (OSError, AttributeError):
+            self.sdl = None
+
+    def scan(self):
+        if not self.sdl or time.monotonic() < self.next_scan:
+            return
+        self.next_scan = time.monotonic() + 1.0
+        count = ctypes.c_int(0)
+        ids = self.sdl.SDL_GetGamepads(ctypes.byref(count))
+        if ids and count.value and not self.pads:
+            self.pads = [p for p in (self.sdl.SDL_OpenGamepad(ids[i]) for i in range(count.value)) if p]
+        if ids:
+            self.sdl.SDL_free(ids)
+
+    def pressed(self):
+        """Buttons newly pressed since the last call: 'left', 'right', 'ok', 'back'."""
+        if not self.sdl:
+            return []
+        self.scan()
+        self.sdl.SDL_UpdateGamepads()
+        now = set()
+        for pad in self.pads:
+            get = self.sdl.SDL_GetGamepadButton
+            x = self.sdl.SDL_GetGamepadAxis(pad, 0)  # left stick X
+            if get(pad, self.DPAD_LEFT) or get(pad, self.DPAD_UP) or x < -20000:
+                now.add('left')
+            if get(pad, self.DPAD_RIGHT) or get(pad, self.DPAD_DOWN) or x > 20000:
+                now.add('right')
+            if get(pad, self.SOUTH):
+                now.add('ok')
+            if get(pad, self.EAST):
+                now.add('back')
+        new = now - self.held
+        self.held = now
+        return sorted(new)
+
+
+def startup_update_prompt(settings, latest_release, version, port_dir):
+    """Before a game started from Steam: if this fork has a newer release, a full-screen prompt
+    (controller, touch, mouse or keyboard) asks Update or Cancel. Update downloads it with a progress
+    bar and then the game closes, to be started again. Returns 'updated', 'declined', 'none' or
+    'error' (no prompt could be shown)."""
+    if not os.environ.get('APPIMAGE') or not settings.get('check_updates', True):
+        return 'none'
+    found = {}
+
+    def check():
+        try:
+            found['release'] = latest_release()
+        except Exception:  # offline, rate limited: just play
+            pass
+    worker = threading.Thread(target=check, daemon=True)
+    worker.start()
+    worker.join(4.0)
+    release = found.get('release')
+    if not release or not release[1] or version_key(release[0]) <= version_key(version):
+        return 'none'
+    newest, url, _page = release
+    try:
+        import tkinter as tk
+        import tkinter.font  # noqa: F401 (tk.font.families)
+        root = tk.Tk()
+    except Exception:
+        return 'error'
+    import queue
+    root.title('Uncharted update')
+    root.configure(bg='#08090a', cursor='')
+    root.geometry(f'{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0')
+    root.attributes('-fullscreen', True)
+    gold, text, muted, card = '#e7c36a', '#f3efe6', '#8e8a82', '#17181b'
+    big = ('Fira Code', 26, 'bold') if 'Fira Code' in tk.font.families(root) else ('DejaVu Sans', 26, 'bold')
+    mid = (big[0], 15)
+    box = tk.Frame(root, bg='#08090a')
+    box.place(relx=0.5, rely=0.5, anchor='center')
+    title = tk.Label(box, text='Update available', bg='#08090a', fg=gold, font=big)
+    title.pack(pady=(0, 18))
+    message = tk.Label(box, text=f'Version {newest} is ready to install.\nYou have version {version}.',
+                       bg='#08090a', fg=text, font=mid, justify='center')
+    message.pack(pady=(0, 34))
+    buttons = tk.Frame(box, bg='#08090a')
+    buttons.pack()
+    state = {'choice': None, 'selected': 0, 'progress': None}
+    labels = []
+    for i, name in enumerate(('Update', 'Cancel')):
+        b = tk.Label(buttons, text=name, font=(big[0], 18, 'bold'), padx=46, pady=16, cursor='hand2')
+        b.grid(row=0, column=i, padx=18)
+        b.bind('<Button-1>', lambda _e, i=i: choose(i))
+        labels.append(b)
+    hint = tk.Label(box, text='A  select     B  cancel     ◀ ▶  move', bg='#08090a', fg=muted, font=(big[0], 11))
+    hint.pack(pady=(28, 0))
+    bar = tk.Canvas(box, width=560, height=22, bg=card, highlightthickness=0)
+    pads = Gamepads(port_dir)
+    events = queue.Queue()
+
+    def paint():
+        for i, b in enumerate(labels):
+            on = i == state['selected']
+            b.configure(bg=gold if on else card, fg='#16120a' if on else text)
+
+    def choose(i):
+        state['selected'] = i
+        paint()
+        if i == 1:
+            state['choice'] = 'declined'
+            root.after(50, root.destroy)
+            return
+        buttons.pack_forget()
+        hint.pack_forget()
+        title.configure(text='Updating')
+        message.configure(text=f'Downloading version {newest}…')
+        bar.pack(pady=(10, 0))
+
+        def work():
+            try:
+                install_appimage(url, Path(os.environ['APPIMAGE']), lambda p: events.put(('progress', p)))
+                events.put(('done', None))
+            except (OSError, ValueError) as error:
+                events.put(('failed', str(error)))
+        threading.Thread(target=work, daemon=True).start()
+        state['progress'] = 0
+
+    def tick():
+        try:
+            while True:
+                kind, value = events.get_nowait()
+                if kind == 'progress':
+                    bar.delete('all')
+                    bar.create_rectangle(0, 0, 560 * value / 100, 22, fill=gold, width=0)
+                    message.configure(text=f'Downloading version {newest}… {value}%')
+                elif kind == 'done':
+                    title.configure(text='Update installed')
+                    message.configure(text=f'Version {newest} is installed.\n'
+                                           'The game will close now. Start it again to play.')
+                    state['choice'] = 'updated'
+                    root.after(5000, root.destroy)
+                elif kind == 'failed':
+                    message.configure(text=f'The update failed: {value[:80]}\nStarting the game…')
+                    state['choice'] = 'declined'
+                    root.after(3500, root.destroy)
+        except queue.Empty:
+            pass
+        if state['progress'] is None:  # still choosing
+            for key in pads.pressed():
+                if key in ('left', 'right'):
+                    state['selected'] = 1 - state['selected']
+                    paint()
+                elif key == 'ok':
+                    choose(state['selected'])
+                    break
+                elif key == 'back':
+                    choose(1)
+                    break
+        root.after(40, tick)
+
+    root.bind('<Left>', lambda _e: (state.update(selected=0), paint()))
+    root.bind('<Right>', lambda _e: (state.update(selected=1), paint()))
+    root.bind('<Tab>', lambda _e: (state.update(selected=1 - state['selected']), paint()))
+    root.bind('<Return>', lambda _e: state['progress'] is None and choose(state['selected']))
+    root.bind('<space>', lambda _e: state['progress'] is None and choose(state['selected']))
+    root.bind('<Escape>', lambda _e: state['progress'] is None and choose(1))
+    paint()
+    root.after(40, tick)
+    root.focus_force()
+    root.mainloop()
+    return state['choice'] or 'declined'
+
+
 def launcher_class(base, ns):
     """A subclass of the launcher's Launcher (ns: the launcher module's globals): the Play page
     lists the three games, each with Add to Steam, Desktop shortcut and Play, usable only when
@@ -461,9 +682,8 @@ def launcher_class(base, ns):
             self.root.after(3000, self.periodic_update_check)
 
         def nav_pages(self):
-            pages = super().nav_pages()
-            at = next(i for i, (name, _t) in enumerate(pages) if name == 'game') + 1
-            return pages[:at] + [('saves', _('Saves'))] + pages[at:]
+            return [('play', _('Library')), ('display', _('Settings')), ('controls', _('Controls')),
+                    ('game', _('Files')), ('advanced', _('Advanced'))]
 
         def build_header(self):
             """Top of the sidebar: the collection's name, 'Linux port' with Tux, and who made what."""
@@ -604,11 +824,35 @@ def launcher_class(base, ns):
             threading.Thread(target=work, daemon=True).start()
 
         def build_advanced(self):
-            """Advanced without the Updates section (the download button does that)."""
-            f = self.page('advanced', _('Advanced'), _('Maintenance and options for testing.'))
+            """Advanced: options for testing and the game's log."""
+            f = self.page('advanced', _('Advanced'), _('Options for testing, and the log of the last run.'))
             self.check(f, 'close_on_play', _('Close the launcher when the game starts'))
             extra = self.ttk.Entry(f, textvariable=self.var('extra_env'), width=60)
             self.row(f, _('Environment'), extra, _('Extra variables for the game, NAME=value separated by spaces.'))
+            self.section(f, _('Log'))
+            self.note(f, _('What the game printed during the last run (also saved as last_run.log in the saves '
+                           'folder).'), top=2)
+            card = self.target(f)
+            holder = self.tk.Frame(card, bg=CARD)
+            holder.grid(row=self.next_row(card), column=0, columnspan=2, sticky='w', pady=(12, 0))
+            self.pill(holder, _('Show the log'), lambda: self.show('log')).pack(side='left')
+            self.pill(holder, _('Open the saves folder'), lambda: open_path(self.saves_folder())).pack(
+                side='left', padx=(8, 0))
+
+        def build_game(self):
+            """Files: the game folder, the saves folder and each game's saves, the shader cache."""
+            f = self.page('game', _('Files'), _('Your own decrypted dump of the collection, its saves and its '
+                                                'shader cache.'))
+            self.folder(f, 'game_dir', _('Game folder'), _('The folder with eboot.bin'),
+                        _('The folder with eboot.bin, big2-ps4_Shipping.elf and big3-ps4_Shipping.elf.'),
+                        on_change=self.refresh)
+            self.folder(f, 'user_dir', _('Saves folder'), _('Where saves and the shader cache are kept'),
+                        _('Empty: a Saves folder in the game folder.'))
+            self.section(f, _('Saves'))
+            card = self.target(f)
+            self.saves_rows = self.tk.Frame(card, bg=CARD)
+            self.saves_rows.grid(row=self.next_row(card), column=0, columnspan=2, sticky='we')
+            self.fill_saves()
             self.section(f, _('Shader cache'))
             self.note(f, _('Compiled shaders are kept so the game does not stutter again. Clear the cache only '
                            'when the picture is broken after an update.'), top=2)
@@ -616,15 +860,24 @@ def launcher_class(base, ns):
             holder = self.tk.Frame(card, bg=CARD)
             holder.grid(row=self.next_row(card), column=0, columnspan=2, sticky='w', pady=(12, 0))
             self.pill(holder, _('Clear shader cache'), self.clear_cache).pack(side='left')
-            self.build_saves()
 
-        def build_saves(self):
-            """Saves: where each game keeps its saves, how many and when last saved."""
-            f = self.page('saves', _('Saves'), _('Each game keeps its saves in its own folder.'))
-            card = self.target(f)
-            self.saves_rows = self.tk.Frame(card, bg=CARD)
-            self.saves_rows.grid(row=self.next_row(card), column=0, columnspan=2, sticky='we')
-            self.fill_saves()
+        def build_display(self):
+            """Settings: display and graphics, and the console (language, player name)."""
+            super().build_display()
+            f = self.page_inner['display']
+            self.section(f, _('Console'))
+            self.row(f, _('Language'), self.choice(f, 'language', ns['LANGUAGES'], 30),
+                     _('The language the PS4 would be set to; the games use it for text and speech.'))
+            name = self.ttk.Entry(f, textvariable=self.var('player_name'), width=30)
+            self.row(f, _('Player name'), name, _('Shown where the game uses the PSN name.'))
+
+        # The upstream defaults (background=CARD) are bound when the module loads: a rounded button
+        # or switch could paint its corners in another colour than the card under it (square look).
+        def pill(self, parent, text, command, kind='secondary', background=None, padding=(16, 8), icon=None):
+            return super().pill(parent, text, command, kind, background or ns['CARD'], padding, icon)
+
+        def toggle(self, parent, variable, background=None):
+            return super().toggle(parent, variable, background or ns['CARD'])
 
         def fill_saves(self):
             import datetime
@@ -658,8 +911,10 @@ def launcher_class(base, ns):
 
         def show(self, name):
             super().show(name)
-            if name == 'saves' and hasattr(self, 'saves_rows'):
+            if name == 'game' and hasattr(self, 'saves_rows'):
                 self.fill_saves()
+            if name == 'log':  # the log belongs to Advanced
+                self._nav_style('advanced', active=True)
 
         def style(self):
             super().style()
@@ -689,7 +944,11 @@ def launcher_class(base, ns):
                         lightcolor=ns['CARD_HI'], darkcolor=ns['CARD_HI'], padding=(self.px(4), 2))
 
         def page(self, name, title, subtitle):
+            if name == 'display':
+                title, subtitle = _('Settings'), _('Display, graphics and the console.')
             f = super().page(name, title, subtitle)
+            self.page_inner = getattr(self, 'page_inner', {})
+            self.page_inner[name] = f
             if name == 'display':
                 self.check(f, 'steam_deck', _('Steam Deck mode'),
                            _('30 FPS at the Deck\'s 1280 × 800, for a steady frame rate on the Steam Deck. '
@@ -730,9 +989,8 @@ def launcher_class(base, ns):
             fullscreen = tk.Label(row, text=_('Fullscreen'), bg=SURFACE, fg=TEXT, font=self.font_ui, cursor='hand2')
             fullscreen.pack(side='left', padx=(self.px(10), 0))
             fullscreen.bind('<Button-1>', lambda _e: self.var('fullscreen').set(not self.var('fullscreen').get()))
-            self.ready = tk.Label(shell, text='', bg=SURFACE, fg=MUTED, font=self.font_ui_sm,
-                                  wraplength=self.px(820), justify='left')
-            self.ready.pack(anchor='w', pady=(0, self.px(16)))
+            # The upstream refresh() writes a line here; it is not shown (the game rows say it).
+            self.ready = tk.Label(shell, text='', bg=SURFACE, fg=MUTED, font=self.font_ui_sm)
 
         def saves_folder(self):
             return Path(self.app.get('user_dir') or ns['DATA_DIR'] / 'user')
@@ -796,7 +1054,7 @@ def launcher_class(base, ns):
                 for button in (steam, shortcut):
                     button.configure(state='normal' if present else 'disabled')
                 if not info:
-                    note.configure(text=_('Choose the game folder on the Game page'))
+                    note.configure(text=_('Choose the game folder on the Files page'))
                 elif present:
                     note.configure(text=_('Ready'))
                 else:
@@ -807,7 +1065,7 @@ def launcher_class(base, ns):
             self.collect()
             info = game_info(self.app['game_dir'])
             if not info:
-                self.messagebox.showerror(NAME, _('Choose the game folder with eboot.bin on the Game page first.'))
+                self.messagebox.showerror(NAME, _('Choose the game folder with eboot.bin on the Files page first.'))
                 self.show('game')
                 return False
             if key not in info['games']:
@@ -855,9 +1113,6 @@ def launcher_class(base, ns):
         def offer_update(self, version, url, page):
             """A newer release (at launch or while open): the download button glows; a click
             installs it."""
-            parts = version.split('.')
-            if len(parts) == 4:  # tag v0.3.1-linux.8 arrives as 0.3.1.8
-                version = '.'.join(parts[:3]) + '-linux.' + parts[3]
             if self.update_state in ('downloading',):
                 return
             self.update_url, self.update_page = url, page or ns['RELEASES_PAGE']
