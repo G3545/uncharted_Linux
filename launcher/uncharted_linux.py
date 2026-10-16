@@ -191,7 +191,7 @@ def desktop_folder():
 
 # ---- Updates --------------------------------------------------------------------------------
 
-def install_appimage(url, target):
+def install_appimage(url, target, progress=None):
     """Downloads the AppImage at `url` next to `target` and puts it in its place (a rename: the
     running AppImage keeps its own mounted copy until it closes)."""
     import urllib.request
@@ -200,7 +200,14 @@ def install_appimage(url, target):
     try:
         with urllib.request.urlopen(request, timeout=60) as response, open(part, 'wb') as out:
             expected = int(response.headers.get('Content-Length') or 0)
-            shutil.copyfileobj(response, out, 1 << 20)
+            done, shown = 0, -1
+            while chunk := response.read(1 << 20):
+                out.write(chunk)
+                done += len(chunk)
+                percent = done * 100 // expected if expected else 0
+                if progress and percent != shown:
+                    shown = percent
+                    progress(percent)
         size = part.stat().st_size
         with open(part, 'rb') as check:
             magic = check.read(4)
@@ -247,15 +254,13 @@ def icon_image(name, size, color, background):
     return image
 
 
-def refresh_icon(size, color, background, glow=0.0, glow_color=None):
-    """A refresh symbol (a circular arrow) as a PIL image; `glow` 0..1 adds a soft halo."""
-    import math
+def download_icon(size, color, background, glow=0.0, glow_color=None):
+    """A download symbol (an arrow into a tray) as a PIL image; `glow` 0..1 adds a soft halo."""
     from PIL import Image, ImageDraw, ImageFilter
 
     def rgb(value):
         return tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
-    scale = 4
-    n = size * scale
+    n = size * 4
     image = Image.new('RGB', (n, n), rgb(background))
     if glow > 0:
         halo = Image.new('L', (n, n), 0)
@@ -263,20 +268,13 @@ def refresh_icon(size, color, background, glow=0.0, glow_color=None):
         halo = halo.filter(ImageFilter.GaussianBlur(n * 0.09))
         image.paste(Image.new('RGB', (n, n), rgb(glow_color or color)), (0, 0), halo)
     draw = ImageDraw.Draw(image)
-    pad, width = n * 0.1, max(2, int(n * 0.12))
-    box = (pad, pad, n - pad, n - pad)
-    draw.arc(box, start=50, end=330, fill=rgb(color), width=width)
-    # Arrowhead at the arc's end (330 degrees), pointing along the arc (clockwise in Tk's y-down).
-    cx = cy = n / 2
-    r = (n - 2 * pad) / 2 - width / 2
-    a = math.radians(330)
-    tip_x, tip_y = cx + r * math.cos(a), cy + r * math.sin(a)
-    head = n * 0.2
-    tangent = a + math.pi / 2
-    points = [(tip_x + head * math.cos(tangent), tip_y + head * math.sin(tangent)),
-              (tip_x + head * 0.9 * math.cos(a), tip_y + head * 0.9 * math.sin(a)),
-              (tip_x - head * 0.9 * math.cos(a), tip_y - head * 0.9 * math.sin(a))]
-    draw.polygon(points, fill=rgb(color))
+    w = max(2, int(n * 0.11))
+    c = rgb(color)
+    draw.line((n * 0.5, n * 0.12, n * 0.5, n * 0.62), fill=c, width=w)            # shaft
+    draw.polygon([(n * 0.27, n * 0.44), (n * 0.73, n * 0.44), (n * 0.5, n * 0.7)], fill=c)  # head
+    draw.line((n * 0.14, n * 0.66, n * 0.14, n * 0.86), fill=c, width=w)          # tray
+    draw.line((n * 0.14, n * 0.86, n * 0.86, n * 0.86), fill=c, width=w)
+    draw.line((n * 0.86, n * 0.86, n * 0.86, n * 0.66), fill=c, width=w)
     return image.resize((size, size), Image.LANCZOS)
 
 
@@ -348,6 +346,9 @@ def apply_defaults(ns):
     """Linux settings the Windows launcher does not have: Steam Deck mode (on by default on
     SteamOS) and a 30 FPS frame rate."""
     ns['APP_DEFAULTS'].setdefault('steam_deck', steam_deck())
+    for name in ('WINDOW_SIZES', 'ANTI_ALIASING'):
+        ns[name][:] = [(value, text.replace("(the games' own)", '(Default)').replace("(the game's own)", '(Default)'))
+                       for value, text in ns[name]]
     if not any(value == '30' for value, _text in ns['FRAME_RATES']):
         ns['FRAME_RATES'].insert(0, ('30', '30 FPS (Steam Deck)'))
 
@@ -452,106 +453,213 @@ def launcher_class(base, ns):
             super().build()
             self.saves_autofill()
             self.root.after(2500, self.watch_for_crash)
-            # "Launching…" for every step of starting a game.
-            configure = self.status.configure
-
-            def status(**kw):
-                if kw.get('text') in LAUNCH_TEXTS:
-                    kw['text'] = _('Launching…')
-                return configure(**kw)
-            self.status.configure = self.status.config = status
+            self.build_header()
+            # No bottom bar: the games start from their own rows; status messages stay hidden.
+            self.status.master.master.pack_forget()
             self.build_corner()
+            self.build_reset()
+            self.root.after(3000, self.periodic_update_check)
+
+        def nav_pages(self):
+            pages = super().nav_pages()
+            at = next(i for i, (name, _t) in enumerate(pages) if name == 'game') + 1
+            return pages[:at] + [('saves', _('Saves'))] + pages[at:]
+
+        def build_header(self):
+            """Top of the sidebar: the collection's name, 'Linux port' with Tux, and who made what."""
+            from PIL import ImageTk
+            tk, bg = self.tk, ns['BG']
+            labels = [w for w in self.side.winfo_children() if isinstance(w, tk.Label)][:5]
+            title, line1, line2, author, version = labels
+            line1.configure(text='THE NATHAN DRAKE')
+            line2.configure(text='COLLECTION')
+            port = tk.Frame(self.side, bg=bg)
+            port.pack(anchor='w', padx=18, pady=(1, 0), after=line2)
+            tk.Label(port, text='LINUX PORT', bg=bg, fg=GOLD, font=self.font_brand_sm).pack(side='left')
+            self._tux = ImageTk.PhotoImage(icon_image('linux', self.px(17), GOLD, bg))
+            tk.Label(port, image=self._tux, bg=bg, bd=0).pack(side='left', padx=(self.px(6), 0))
+            version.configure(text=_('Linux port by spacepepperoni'), fg=TEXT, font=self.font_ui_md)
+            author.pack_configure(pady=(self.px(12), 0))
+
+        def build_reset(self):
+            """Reset to defaults, at the bottom right of the window."""
+            right = self.content.master
+            button = self.pill(right, _('Reset to defaults'), self.reset_defaults, background=SURFACE,
+                               padding=(14, 6))
+            button.canvas.place(relx=1.0, rely=1.0, x=-self.px(40), y=-self.px(16), anchor='se')
+            self.tk.Misc.lift(button.canvas)  # Canvas.lift() raises canvas items, not the widget
+
+        def reset_defaults(self):
+            if not self.messagebox.askyesno(NAME, _('Reset all settings to their defaults? The game folder, '
+                                                    'the saves folder and your controls are kept.')):
+                return
+            keep = ('game_dir', 'user_dir', 'player_name', 'key_bindings', 'pad_bindings', 'reported_crash')
+            for key, value in ns['APP_DEFAULTS'].items():
+                if key in keep:
+                    continue
+                self.app[key] = value
+                if key in self.vars:
+                    self.vars[key].set(value)
+            self.collect()
+            self.refresh()
 
         def build_corner(self):
-            """Bottom of the sidebar: the GitHub mark (this fork's repository) and the update
-            button (grey: up to date, click to check; glowing: a new version, click to use it)."""
+            """Bottom of the sidebar: the GitHub mark, the download button (grey: up to date;
+            glowing and pulsing: a new version, click to install it) and the version."""
             from PIL import ImageTk
             tk, bg, size = self.tk, ns['BG'], self.px(26)
             self.side_note.pack_forget()
             row = tk.Frame(self.side, bg=bg)
-            row.pack(anchor='w', padx=18, pady=(0, 18))
-            self.side_note = row  # update notices are packed above it
-
-            def icon(label, normal, hot, command, hint):
-                label.configure(image=normal, cursor='hand2')
-                label.bind('<Button-1>', lambda _e: command())
-                label.bind('<Enter>', lambda _e: (label.configure(image=hot()), self.corner_hint(hint())))
-                label.bind('<Leave>', lambda _e: (label.configure(image=normal() if callable(normal) else normal),
-                                                  self.corner_hint(None)))
+            row.pack(anchor='w', fill='x', padx=18, pady=(0, 18))
+            self.side_note = row
             self._github = ImageTk.PhotoImage(icon_image('github', size, MUTED, bg))
             self._github_hot = ImageTk.PhotoImage(icon_image('github', size, TEXT, bg))
-            github = tk.Label(row, bg=bg, bd=0)
+            github = tk.Label(row, bg=bg, bd=0, image=self._github, cursor='hand2')
             github.pack(side='left')
-            icon(github, self._github, lambda: self._github_hot, lambda: open_path(REPO_URL),
-                 lambda: _('This fork on GitHub'))
-            self._refresh_idle = ImageTk.PhotoImage(refresh_icon(size, MUTED, bg))
-            self._refresh_hot = ImageTk.PhotoImage(refresh_icon(size, TEXT, bg))
-            self._refresh_glow = [ImageTk.PhotoImage(refresh_icon(size, ns['GOLD_HI'], bg, glow=g, glow_color=GOLD))
-                                  for g in (0.25, 0.45, 0.65, 0.85, 1.0, 0.85, 0.65, 0.45)]
-            self.update_button = tk.Label(row, bg=bg, bd=0, image=self._refresh_idle, cursor='hand2')
+            github.bind('<Button-1>', lambda _e: open_path(REPO_URL))
+            github.bind('<Enter>', lambda _e: github.configure(image=self._github_hot))
+            github.bind('<Leave>', lambda _e: github.configure(image=self._github))
+            self._download_idle = ImageTk.PhotoImage(download_icon(size, MUTED, bg))
+            self._download_hot = ImageTk.PhotoImage(download_icon(size, TEXT, bg))
+            self._download_glow = [ImageTk.PhotoImage(download_icon(size, ns['GOLD_HI'], bg, glow=g, glow_color=GOLD))
+                                   for g in (0.2, 0.4, 0.6, 0.8, 1.0, 0.8, 0.6, 0.4)]
+            self.update_button = tk.Label(row, bg=bg, bd=0, image=self._download_idle, cursor='hand2')
             self.update_button.pack(side='left', padx=(self.px(12), 0))
             self.update_button.bind('<Button-1>', lambda _e: self.update_clicked())
-            self.update_button.bind('<Enter>', lambda _e: (self.update_state == 'none' and
-                                                           self.update_button.configure(image=self._refresh_hot),
-                                                           self.corner_hint(self.update_hint())))
-            self.update_button.bind('<Leave>', lambda _e: (self.update_state == 'none' and
-                                                           self.update_button.configure(image=self._refresh_idle),
-                                                           self.corner_hint(None)))
-            self.update_state, self.update_version, self.update_page = 'none', None, ns['RELEASES_PAGE']
+            self.update_button.bind('<Enter>', lambda _e: self.update_state == 'none' and
+                                    self.update_button.configure(image=self._download_hot))
+            self.update_button.bind('<Leave>', lambda _e: self.update_state == 'none' and
+                                    self.update_button.configure(image=self._download_idle))
+            self.version_label = tk.Label(row, text=ns['VERSION'], bg=bg, fg=MUTED, font=self.font_ui_sm)
+            self.version_label.pack(side='left', padx=(self.px(10), 0))
+            self.update_state, self.update_version, self.update_url = 'none', None, None
+            self.update_page = ns['RELEASES_PAGE']
             self._glow_frame = 0
 
-        def corner_hint(self, text):
-            """What a sidebar icon does, in the status line while the pointer is on it."""
-            if text:
-                self._status_before = (self.status.cget('text'), self.status.cget('fg'))
-                self.status.configure(text=text, fg=TEXT)
-            elif getattr(self, '_status_before', None):
-                text, fg = self._status_before
-                self._status_before = None
-                self.status.configure(text=text, fg=fg)
-
-        def update_hint(self):
-            version = self.update_version or ''
-            return {'none': _('Up to date (version {}). Click to check for a new version.').format(ns['VERSION']),
-                    'checking': _('Checking for a new version…'),
-                    'downloading': _('Downloading version {}…').format(version),
-                    'ready': _('Version {} is ready. Click to restart the launcher with it.').format(version),
-                    'available': _('Version {} is available. Click to download it.').format(version)}[self.update_state]
+        def show_version(self, text=None, fg=None):
+            self.version_label.configure(text=text or ns['VERSION'], fg=fg or MUTED)
 
         def set_update_state(self, state, version=None):
             self.update_state = state
             if version:
                 self.update_version = version
-            if state in ('ready', 'available', 'downloading'):
+            if state in ('available', 'downloading'):
                 if not getattr(self, '_glowing', False):
                     self._glowing = True
                     self.glow()
             else:
                 self._glowing = False
-                self.update_button.configure(image=self._refresh_idle)
+                self.update_button.configure(image=self._download_idle)
 
         def glow(self):
             if not self._glowing:
                 return
-            self._glow_frame = (self._glow_frame + 1) % len(self._refresh_glow)
-            self.update_button.configure(image=self._refresh_glow[self._glow_frame])
+            self._glow_frame = (self._glow_frame + 1) % len(self._download_glow)
+            self.update_button.configure(image=self._download_glow[self._glow_frame])
             self.root.after(110, self.glow)
 
+        def periodic_update_check(self):
+            """At launch and every 30 minutes while the launcher is open."""
+            if self.app.get('check_updates', True) and self.update_state == 'none':
+                threading.Thread(target=self.check_update, daemon=True).start()
+            self.root.after(30 * 60 * 1000, self.periodic_update_check)
+
         def update_clicked(self):
-            state = self.update_state
-            if state == 'ready':
-                self.restart_updated()
-            elif state == 'available':
-                open_path(self.update_page)
-            elif state == 'none':
-                self.update_state = 'checking'
-                self.corner_hint(None)
-                self.status.configure(text=_('Checking for a new version…'), fg=MUTED)
+            if self.update_state == 'available':
+                self.install_update_now()
+            elif self.update_state == 'none':
+                self.show_version(_('Checking…'))
 
                 def check():
                     self.check_update(manual=True)
-                    self.ui_calls.put(lambda: self.update_state == 'checking' and self.set_update_state('none'))
+                    self.ui_calls.put(lambda: self.update_state == 'none' and self.show_version())
                 threading.Thread(target=check, daemon=True).start()
+
+        def install_update_now(self):
+            """Downloads the new AppImage, puts it in place and restarts the launcher with it
+            (other installs: the release page)."""
+            if self.process:
+                self.messagebox.showinfo(NAME, _('Close the game before updating.'))
+                return
+            if not os.environ.get('APPIMAGE') or not self.update_url:
+                open_path(self.update_page)
+                return
+            version = self.update_version
+            self.set_update_state('downloading', version)
+
+            def progress(percent):
+                self.ui_calls.put(lambda: self.show_version(_('Downloading {}%').format(percent), GOLD))
+
+            def work():
+                try:
+                    install_appimage(self.update_url, Path(os.environ['APPIMAGE']), progress)
+                except (OSError, ValueError) as failure:
+                    def failed(error=failure):
+                        self.set_update_state('available', version)
+                        self.show_version()
+                        self.messagebox.showerror(NAME, _('Update failed: {}').format(error))
+                    self.ui_calls.put(failed)
+                    return
+                self.ui_calls.put(self.restart_updated)
+            threading.Thread(target=work, daemon=True).start()
+
+        def build_advanced(self):
+            """Advanced without the Updates section (the download button does that)."""
+            f = self.page('advanced', _('Advanced'), _('Maintenance and options for testing.'))
+            self.check(f, 'close_on_play', _('Close the launcher when the game starts'))
+            extra = self.ttk.Entry(f, textvariable=self.var('extra_env'), width=60)
+            self.row(f, _('Environment'), extra, _('Extra variables for the game, NAME=value separated by spaces.'))
+            self.section(f, _('Shader cache'))
+            self.note(f, _('Compiled shaders are kept so the game does not stutter again. Clear the cache only '
+                           'when the picture is broken after an update.'), top=2)
+            card = self.target(f)
+            holder = self.tk.Frame(card, bg=CARD)
+            holder.grid(row=self.next_row(card), column=0, columnspan=2, sticky='w', pady=(12, 0))
+            self.pill(holder, _('Clear shader cache'), self.clear_cache).pack(side='left')
+            self.build_saves()
+
+        def build_saves(self):
+            """Saves: where each game keeps its saves, how many and when last saved."""
+            f = self.page('saves', _('Saves'), _('Each game keeps its saves in its own folder.'))
+            card = self.target(f)
+            self.saves_rows = self.tk.Frame(card, bg=CARD)
+            self.saves_rows.grid(row=self.next_row(card), column=0, columnspan=2, sticky='we')
+            self.fill_saves()
+
+        def fill_saves(self):
+            import datetime
+            tk = self.tk
+            for child in self.saves_rows.winfo_children():
+                child.destroy()
+            base = self.saves_folder()
+            folders = (('Uncharted 1', GAMES[0][1]), ('Uncharted 2', GAMES[1][1]), ('Uncharted 3', GAMES[2][1]))
+            for r, (folder_name, title) in enumerate(folders):
+                folder = base / folder_name
+                saves = [d for d in folder.glob('SAVEDATA*') if d.is_dir() and not d.name.endswith('.sce_sys')] \
+                    if folder.is_dir() else []
+                if saves:
+                    newest = max(d.stat().st_mtime for d in saves)
+                    info = (_('1 save, last saved {}') if len(saves) == 1 else
+                            _('{} saves, last saved {}').replace('{}', str(len(saves)), 1)).format(
+                        datetime.datetime.fromtimestamp(newest).strftime('%Y-%m-%d %H:%M'))
+                else:
+                    info = _('No saves yet')
+                block = tk.Frame(self.saves_rows, bg=CARD)
+                block.grid(row=r, column=0, sticky='we', pady=(self.px(4) if r else 0, self.px(10)))
+                tk.Label(block, text=f'{folder_name}: {title}', bg=CARD, fg=TEXT,
+                         font=self.font_brand_md).grid(row=0, column=0, sticky='w')
+                tk.Label(block, text=str(folder), bg=CARD, fg=TEXT, font=self.font_ui_sm).grid(
+                    row=1, column=0, sticky='w')
+                tk.Label(block, text=info, bg=CARD, fg=MUTED, font=self.font_ui_sm).grid(
+                    row=2, column=0, sticky='w')
+                self.pill(block, _('Open'), lambda d=folder: (d.mkdir(parents=True, exist_ok=True), open_path(d)),
+                          padding=(14, 6)).grid(row=0, column=1, rowspan=3, sticky='e', padx=(self.px(24), 0))
+                block.columnconfigure(0, weight=1)
+
+        def show(self, name):
+            super().show(name)
+            if name == 'saves' and hasattr(self, 'saves_rows'):
+                self.fill_saves()
 
         def style(self):
             super().style()
@@ -745,42 +853,16 @@ def launcher_class(base, ns):
 
         # ---- updates: the AppImage replaces itself with the newest release of this fork ----------
         def offer_update(self, version, url, page):
-            """A newer release: an AppImage downloads it in the background and swaps it in, then
-            the update button glows (click: restart with it). Other installs (the tarball, a
-            source tree): the button glows and opens the release page."""
+            """A newer release (at launch or while open): the download button glows; a click
+            installs it."""
             parts = version.split('.')
             if len(parts) == 4:  # tag v0.3.1-linux.8 arrives as 0.3.1.8
                 version = '.'.join(parts[:3]) + '-linux.' + parts[3]
-            if self.update_state in ('downloading', 'ready'):
+            if self.update_state in ('downloading',):
                 return
-            self.update_page = page or ns['RELEASES_PAGE']
-            if not os.environ.get('APPIMAGE') or not url:
-                self.set_update_state('available', version)
-                if not self.process:
-                    self.status.configure(text=_('Version {} is available.').format(version), fg=GOLD)
-                return
-            self.set_update_state('downloading', version)
-            if not self.process:
-                self.status.configure(text=_('Downloading version {}…').format(version), fg=GOLD)
-
-            def work():
-                try:
-                    install_appimage(url, Path(os.environ['APPIMAGE']))
-                except (OSError, ValueError) as failure:
-                    def failed(error=failure):
-                        self.set_update_state('available', version)
-                        if not self.process:
-                            self.status.configure(text=_('Update failed: {}').format(error), fg=MUTED)
-                    self.ui_calls.put(failed)
-                    return
-                self.ui_calls.put(lambda: self.updated(version))
-            threading.Thread(target=work, daemon=True).start()
-
-        def updated(self, version):
-            self.set_update_state('ready', version)
-            if not self.process:
-                self.status.configure(text=_('Version {} is ready. Click the glowing button to restart with it.')
-                                      .format(version), fg=GOLD)
+            self.update_url, self.update_page = url, page or ns['RELEASES_PAGE']
+            self.set_update_state('available', version)
+            self.show_version(_('{} available').format(version), GOLD)
 
         def restart_updated(self):
             if self.process:
