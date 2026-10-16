@@ -175,6 +175,14 @@ def main():
     loadexec = out_root / 'loadexec.txt'
     env['BB_LOADEXEC_FILE'] = str(loadexec)
     guest_argv = None
+    if not WINDOWS:  # Linux fork: what ran, at the top of every log (crash reports read it)
+        try:
+            build = (PORT / 'LINUX_BUILD').read_text().strip() or 'source'
+        except OSError:
+            build = 'source'
+        print(f'Run: Uncharted Linux {build}, game {exe}, {os.uname().sysname} {os.uname().release}, '
+              f'vblank {env.get("BB_VBLANK_HZ")} Hz, window {env.get("BB_WINDOW_SIZE", "-")}, '
+              f'extra {" ".join(k + "=" + env[k] for k in ("BB_NAN_GUARD", "BB_GUEST_MXCSR", "BB_PROBE") if env.get(k)) or "-"}')
     # Linux fork, experiment: BB_U1_DIRECT=1 starts eboot.bin the way the collection menu starts
     # a game (arguments eboot.bin ispartofuccollection), to boot Uncharted 1 past the menu.
     if exe == EXECUTABLES['u1'] and env.get('BB_U1_DIRECT') == '1':

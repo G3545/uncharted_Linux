@@ -300,6 +300,50 @@ def desktop_game_entry(launcher_file, key, name):
     return written
 
 
+# ---- Crash reports -----------------------------------------------------------------------------
+
+CRASH_MARKERS = ('STOP:', 'Fault:', '*** ASSERTION', 'ASSERTION:', 'Device lost', 'GPU crash: the graphics')
+
+
+def crash_signature(log_path):
+    """The first line of a run log that says how the game stopped, or None (it ended normally)."""
+    try:
+        text = Path(log_path).read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return None, ''
+    for line in text.splitlines():
+        if line.startswith(CRASH_MARKERS):
+            return line.strip(), text
+    return None, text
+
+
+def system_summary():
+    def read(path, key=None):
+        try:
+            for line in Path(path).read_text().splitlines():
+                if key is None or line.startswith(key):
+                    return line.split('=', 1)[-1].split(':', 1)[-1].strip().strip('"')
+        except OSError:
+            pass
+        return '?'
+    return (f"{read('/etc/os-release', 'PRETTY_NAME')}; CPU {read('/proc/cpuinfo', 'model name')}; "
+            f"{'Steam Deck' if steam_deck() else 'PC'}")
+
+
+def crash_report_url(signature, text):
+    """A new-issue link on this fork with the crash line, the system and the end of the log
+    (GitHub opens it pre-filled; nothing is sent until the player submits it)."""
+    import urllib.parse
+    run = next((line for line in text.splitlines() if line.startswith('Run: ')), 'Run: ?')
+    tail = '\n'.join(text.splitlines()[-45:])[-3500:]
+    body = (f'**Crash:** `{signature[:200]}`\n\n**{run}**\n\n**System:** {system_summary()}\n\n'
+            f'Please attach `last_run.log` from the saves folder (the launcher opened it) and say '
+            f'where in the game it happened.\n\n<details><summary>End of the log</summary>\n\n```\n'
+            f'{tail}\n```\n</details>\n')
+    query = urllib.parse.urlencode({'title': f'Crash: {signature[:90]}', 'body': body, 'labels': 'crash'})
+    return f'{REPO_URL}/issues/new?{query}'
+
+
 def apply_defaults(ns):
     """Linux settings the Windows launcher does not have: Steam Deck mode (on by default on
     SteamOS) and a 30 FPS frame rate."""
@@ -407,6 +451,7 @@ def launcher_class(base, ns):
         def build(self):
             super().build()
             self.saves_autofill()
+            self.root.after(2500, self.watch_for_crash)
             # "Launching…" for every step of starting a game.
             configure = self.status.configure
 
@@ -580,6 +625,36 @@ def launcher_class(base, ns):
             self.ready = tk.Label(shell, text='', bg=SURFACE, fg=MUTED, font=self.font_ui_sm,
                                   wraplength=self.px(820), justify='left')
             self.ready.pack(anchor='w', pady=(0, self.px(16)))
+
+        def saves_folder(self):
+            return Path(self.app.get('user_dir') or ns['DATA_DIR'] / 'user')
+
+        def watch_for_crash(self):
+            """After every run (and once at start, for a run started from Steam): a crashed one
+            gets an offer to report it."""
+            running = bool(self.process)
+            before = getattr(self, '_was_running', None)  # None: the launcher just started
+            if not running and before is not False:
+                self.root.after(1500, self.offer_crash_report)
+            self._was_running = running
+            self.root.after(1000, self.watch_for_crash)
+
+        def offer_crash_report(self):
+            import hashlib
+            log = self.saves_folder() / 'last_run.log'
+            signature, text = crash_signature(log)
+            if not signature:
+                return
+            key = hashlib.sha1(text.encode(errors='replace')).hexdigest()[:16]
+            if self.app.get('reported_crash') == key:
+                return
+            self.app['reported_crash'] = key  # asked once per crashed run, whatever the answer
+            self.collect()
+            if self.messagebox.askyesno(NAME, _('Uncharted stopped with:\n\n{}\n\nOpen a crash report on GitHub? '
+                                                'Your system details and the end of the log are filled in; nothing '
+                                                'is sent until you submit it.').format(signature[:160])):
+                open_path(crash_report_url(signature, text))
+                open_path(self.saves_folder())
 
         def saves_autofill(self):
             # Choosing a game folder fills in <folder>/Saves, unless the player chose a saves
