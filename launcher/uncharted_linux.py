@@ -237,6 +237,9 @@ def steam_command(steam, launcher_file, game):
 
 
 REPO_URL = 'https://github.com/spacepepperoni/uncharted_Linux'
+# Crash reports go to upstream's tracker: the fork has no issues, and most crashes are in the
+# emulation shared with upstream.
+UPSTREAM_ISSUES = 'https://github.com/Supermedo/uncharted_pc/issues'
 
 
 def icon_image(name, size, color, background):
@@ -330,17 +333,18 @@ def system_summary():
 
 
 def crash_report_url(signature, text):
-    """A new-issue link on this fork with the crash line, the system and the end of the log
-    (GitHub opens it pre-filled; nothing is sent until the player submits it)."""
+    """A new-issue link on upstream's tracker with the crash line, the system and the end of the
+    log (GitHub opens it pre-filled; nothing is sent until the player submits it)."""
     import urllib.parse
     run = next((line for line in text.splitlines() if line.startswith('Run: ')), 'Run: ?')
     tail = '\n'.join(text.splitlines()[-45:])[-3500:]
-    body = (f'**Crash:** `{signature[:200]}`\n\n**{run}**\n\n**System:** {system_summary()}\n\n'
+    body = (f'**Crash:** `{signature[:200]}`\n\n**Build:** Linux fork ({REPO_URL}), not the Windows '
+            f'release\n\n**{run}**\n\n**System:** {system_summary()}\n\n'
             f'Please attach `last_run.log` from the saves folder (the launcher opened it) and say '
             f'where in the game it happened.\n\n<details><summary>End of the log</summary>\n\n```\n'
             f'{tail}\n```\n</details>\n')
-    query = urllib.parse.urlencode({'title': f'Crash: {signature[:90]}', 'body': body, 'labels': 'crash'})
-    return f'{REPO_URL}/issues/new?{query}'
+    query = urllib.parse.urlencode({'title': f'Crash (Linux): {signature[:90]}', 'body': body})
+    return f'{UPSTREAM_ISSUES}/new?{query}'
 
 
 def version_key(text):
@@ -1021,9 +1025,10 @@ def launcher_class(base, ns):
                 return
             self.app['reported_crash'] = key  # asked once per crashed run, whatever the answer
             self.collect()
-            if self.messagebox.askyesno(NAME, _('Uncharted stopped with:\n\n{}\n\nOpen a crash report on GitHub? '
+            if self.messagebox.askyesno(NAME, _('Uncharted stopped with:\n\n{}\n\nOpen a crash report on the Uncharted port\'s GitHub? '
                                                 'Your system details and the end of the log are filled in; nothing '
-                                                'is sent until you submit it.').format(signature[:160])):
+                                                'is sent until you submit it. Please check its open issues for the '
+                                                'same crash first.').format(signature[:160])):
                 open_path(crash_report_url(signature, text))
                 open_path(self.saves_folder())
 
