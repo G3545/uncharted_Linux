@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 import time
 
 APP_ID = 'uncharted-linux'
@@ -366,6 +367,8 @@ def apply_defaults(ns):
     ns['FRAME_RATES'][:] = [(value, '60 FPS (Default)' if value == '60' else text) for value, text in ns['FRAME_RATES']]
     if not any(value == '30' for value, _text in ns['FRAME_RATES']):
         ns['FRAME_RATES'].insert(0, ('30', '30 FPS (Steam Deck)'))
+    if not any(value == '1280x800' for value, _text in ns['WINDOW_SIZES']):
+        ns['WINDOW_SIZES'].insert(1, ('1280x800', '1280 × 800 (Steam Deck)'))
 
 
 def saves_for(game_dir):
@@ -376,6 +379,13 @@ def default_saves(settings, data_dir=None):
     """An empty saves folder means <game folder>/Saves."""
     if not settings.get('user_dir') and settings.get('game_dir'):
         settings['user_dir'] = saves_for(settings['game_dir'])
+
+
+# Steam Deck mode shows its values in these settings while it is on (deck_environment enforces
+# the locked ones at launch); turning it off restores what the player had.
+DECK_SETTINGS = {'frame_rate': '30', 'window_size': '1280x800', 'present_mode': 'Fifo', 'fullscreen': True,
+                 'anti_aliasing': 'off', 'frame_generation': 'off'}
+DECK_LOCKED = ('frame_rate', 'window_size', 'present_mode', 'fullscreen')
 
 
 def deck_environment(settings, env):
@@ -683,6 +693,43 @@ def launcher_class(base, ns):
             self.status.master.master.pack_forget()
             self.build_corner()
             self.root.after(3000, self.periodic_update_check)
+            # X11 Tk reports the wheel as buttons 4 and 5, not <MouseWheel>: the pages did not scroll.
+            for button, delta in (('<Button-4>', 120), ('<Button-5>', -120)):
+                handler = lambda e, d=delta: self.on_wheel(SimpleNamespace(delta=d, widget=e.widget))
+                self.root.bind_all(button, handler)
+                self.root.bind_class('TCombobox', button, handler)
+            self.var('steam_deck').trace_add('write', lambda *_a: self.steam_deck_changed())
+            self.steam_deck_changed(startup=True)
+
+        def choice(self, parent, key, options, width=36):
+            box = super().choice(parent, key, options, width)
+            self.boxes = getattr(self, 'boxes', {})
+            self.boxes[key] = box
+            return box
+
+        def steam_deck_changed(self, startup=False):
+            """Steam Deck mode on: the affected settings switch to the Deck's values (the previous ones
+            are kept in deck_saved) and the enforced ones are locked. Off: the kept values come back."""
+            on = bool(self.var('steam_deck').get())
+            saved = self.app.get('deck_saved')
+            if on and not isinstance(saved, dict):
+                self.app['deck_saved'] = {key: self.var(key).get() for key in DECK_SETTINGS}
+                for key, value in DECK_SETTINGS.items():
+                    self.var(key).set(value)
+            elif not on and isinstance(saved, dict):
+                for key, value in saved.items():
+                    if key in DECK_SETTINGS:
+                        self.var(key).set(value)
+                self.app.pop('deck_saved', None)
+            elif on and startup:
+                for key in DECK_LOCKED:  # what deck_environment will use anyway
+                    self.var(key).set(DECK_SETTINGS[key])
+            for key in DECK_LOCKED:
+                box = getattr(self, 'boxes', {}).get(key)
+                if box is not None:
+                    box.configure(state='disabled' if on else 'readonly')
+            if not startup:
+                self.collect()
 
         def nav_pages(self):
             return [('play', _('Library')), ('display', _('Settings')), ('controls', _('Controls')),
@@ -694,10 +741,16 @@ def launcher_class(base, ns):
             tk, bg = self.tk, ns['BG']
             labels = [w for w in self.side.winfo_children() if isinstance(w, tk.Label)][:5]
             title, line1, line2, author, version = labels
-            line1.configure(text='THE NATHAN DRAKE', fg=GOLD)
-            line2.configure(text='COLLECTION', fg=GOLD)
+            # The collection's name on one line: the largest brand size that fits the sidebar.
+            import tkinter.font as tkfont
+            name, room = 'THE NATHAN DRAKE COLLECTION', self.px(248) - 2 * self.px(20)
+            family, size = self.font_brand_sm[0], self.font_brand_sm[1]
+            while size > 7 and tkfont.Font(root=self.root, family=family, size=size).measure(name) > room:
+                size -= 1
+            line1.configure(text=name, fg=GOLD, font=(family, size))
+            line2.pack_forget()
             port = tk.Frame(self.side, bg=bg)
-            port.pack(anchor='w', padx=18, pady=(1, 0), after=line2)
+            port.pack(anchor='w', padx=18, pady=(1, 0), after=line1)
             tk.Label(port, text='LINUX PORT', bg=bg, fg=GOLD, font=self.font_brand_sm).pack(side='left')
             self._tux = ImageTk.PhotoImage(icon_image('linux', self.px(17), GOLD, bg))
             tk.Label(port, image=self._tux, bg=bg, bd=0).pack(side='left', padx=(self.px(6), 0))
@@ -956,8 +1009,9 @@ def launcher_class(base, ns):
             self.page_inner[name] = f
             if name == 'display':
                 self.check(f, 'steam_deck', _('Steam Deck mode'),
-                           _('30 FPS at the Deck\'s 1280 × 800, for a steady frame rate on the Steam Deck. '
-                             'On by default on SteamOS.'))
+                           _('Sets 30 FPS, the Deck\'s 1280 × 800, FIFO and fullscreen, and turns off anti-aliasing '
+                             'and frame generation, for a steady frame rate on the Steam Deck. Turning it off '
+                             'brings back your previous settings. On by default on SteamOS.'))
             return f
 
         def build_play(self):
@@ -968,12 +1022,12 @@ def launcher_class(base, ns):
             self.game_rows = {}
             shell = tk.Frame(page, bg=SURFACE)
             shell.pack(fill='both', expand=True, padx=self.px(44), pady=(self.px(36), self.px(10)))
-            for number, (key, title, _subtitle, exe) in enumerate(GAMES, start=1):
+            for key, title, _subtitle, exe in GAMES:
                 row = tk.Frame(shell, bg=CARD, highlightthickness=0)
                 row.pack(fill='x', pady=(0, self.px(10)))
                 text = tk.Frame(row, bg=CARD)
                 text.pack(side='left', padx=self.px(18), pady=self.px(14))
-                tk.Label(text, text=f'Uncharted {number}: {title}', bg=CARD, fg=TEXT,
+                tk.Label(text, text=f'Uncharted: {title}', bg=CARD, fg=TEXT,
                          font=self.font_brand_md).pack(anchor='w')
                 note = tk.Label(text, text='', bg=CARD, fg=MUTED, font=self.font_ui_sm)
                 note.pack(anchor='w')
