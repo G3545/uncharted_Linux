@@ -5,11 +5,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <condition_variable>
 #include <deque>
 #include <functional>
 #include <memory>
+#include <source_location>
 #include <span>
 #include <utility>
 #include <vector>
@@ -614,6 +616,11 @@ public:
         return storage + offset;
     }
 
+    /// Storage for data too large for the chunk, freed with the chunk's commands.
+    void* AllocateOverflow(size_t bytes) {
+        return overflow.emplace_back(std::make_unique_for_overwrite<std::byte[]>(bytes)).get();
+    }
+
     void Execute(vk::CommandBuffer cmdbuf) {
         for (CommandBase* command = first; command;) {
             CommandBase* const next = command->next;
@@ -623,6 +630,7 @@ public:
         }
         first = last = nullptr;
         used = 0;
+        overflow.clear();
     }
 
     [[nodiscard]] bool Empty() const noexcept {
@@ -661,6 +669,7 @@ private:
 
     alignas(64) std::byte storage[Capacity];
     size_t used = 0;
+    std::vector<std::unique_ptr<std::byte[]>> overflow;
     CommandBase* first{};
     CommandBase* last{};
 };
@@ -742,11 +751,6 @@ public:
             func(current_cmdbuf);
             return;
         }
-        if (direct_next) {  // data too large for a chunk: recorded here, after the queue drained
-            direct_next = false;
-            func(current_cmdbuf);
-            return;
-        }
         if (BbToggle::Disabled(BbToggle::ThreadedRecording)) {
             SyncRecording();
             direct_mode = true;
@@ -777,16 +781,11 @@ public:
     /// Makes room for `bytes` of RecordData() plus the command that uses them in the current
     /// chunk: data and command must share a chunk, which is recycled once executed.
     void ReserveRecordData(size_t bytes) {
-        if (!IsRecordingDeferred() || direct_next) {
+        if (!IsRecordingDeferred()) {
             return;
         }
         if (bytes + 1024 > RecordChunk::Capacity) {
-            // Linux fork: more data than a chunk holds (thousands of copy regions in Uncharted 2
-            // on the Steam Deck ended the game here). Drain the queue and record the next
-            // command directly; RecordData() then returns the caller's own data.
-            SyncRecording();
-            direct_next = true;
-            return;
+            bytes = 0; // RecordData puts it in the chunk's overflow storage; keep room for the command
         }
         if (RecordChunk::Capacity - record_chunk->Size() < bytes + 1024) {
             RetireChunk();
@@ -796,17 +795,29 @@ public:
     /// Copies `data` into recording storage that lives until the command that uses it has
     /// been recorded (the same chunk). With threaded recording off, returns `data` itself.
     template <typename T>
-    std::span<const T> RecordData(std::span<const T> data) {
+    std::span<const T> RecordData(std::span<const T> data,
+                                  std::source_location where = std::source_location::current()) {
         if (!IsRecordingDeferred() || data.empty()) {
             return data;
         }
         // Room for the data and the command that follows it, so both stay in one chunk.
         const size_t bytes = data.size_bytes();
         ReserveRecordData(bytes + alignof(T));
-        if (direct_next) {
-            return data;
+        void* storage = nullptr;
+        if (RecordChunk::Capacity - record_chunk->Size() >= bytes + alignof(T) + 1024) {
+            storage = record_chunk->Allocate(bytes, alignof(T));
         }
-        auto* dst = static_cast<T*>(record_chunk->Allocate(bytes, alignof(T)));
+        if (!storage) {
+            // More than a chunk holds (thousands of copy regions or barriers): heap storage owned
+            // by the same chunk, so it lives until the command has been recorded.
+            static std::atomic<bool> logged{false};
+            if (!logged.exchange(true, std::memory_order_relaxed)) {
+                std::fprintf(stderr, "Recording: %zu bytes of command data from %s:%u, over a chunk\n",
+                             bytes, where.file_name(), unsigned(where.line()));
+            }
+            storage = record_chunk->AllocateOverflow(bytes);
+        }
+        auto* dst = static_cast<T*>(storage);
         std::memcpy(dst, data.data(), bytes);
         return {dst, data.size()};
     }
@@ -817,7 +828,6 @@ public:
 
     /// Waits until every recorded command is in the command buffer.
     void SyncRecording();
-    bool direct_next = false;  ///< Linux fork: the next Record() runs directly (ReserveRecordData)
 
     /// bbport: guest memory copies on the recording thread (small ones, RecordHostCopy) or the
     /// copy threads (BbCopy::Async) must be done before the guest learns the GPU is past them
