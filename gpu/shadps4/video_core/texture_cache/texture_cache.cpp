@@ -192,12 +192,13 @@ void TextureCache::ApplyBackingWrites() {
     }
 }
 
-void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
+void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size, bool whole_range) {
     std::scoped_lock lock{mutex};
     ForEachImageInRegion(address, max_size, [&](ImageId image_id, Image& image) {
-        // Only consider images that match base address.
+        // Only consider images that match base address, or with whole_range every image
+        // overlapping the written range.
         // TODO: Maybe also consider subresources
-        if (image.info.guest_address != address) {
+        if (whole_range ? !image.Overlaps(address, max_size) : image.info.guest_address != address) {
             return;
         }
         // Ensure image is reuploaded when accessed again.
@@ -954,6 +955,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
     image.flags |= ImageFlagBits::Registered;
     ++registry_generation;
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
+    registered_image_bytes += Common::AlignUp(image.info.guest_size, 1024);
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
     ForEachPage(image.info.guest_address, image.info.guest_size,
@@ -968,6 +970,7 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ++registry_generation;
     lru_cache.Free(image.lru_id);
     total_used_memory -= Common::AlignUp(image.info.guest_size, 1024);
+    registered_image_bytes -= Common::AlignUp(image.info.guest_size, 1024);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
         if (page_it == nullptr) {
@@ -1161,7 +1164,9 @@ void TextureCache::GarbageCollectImages() {
     const auto configure = [&](bool allow_aggressive, bool emergency = false) {
         pressured = total_used_memory >= pressure_gc_memory;
         aggresive = allow_aggressive && total_used_memory >= critical_gc_memory;
-        const u64 ticks_to_destroy = std::min<u64>(aggresive ? 160 : pressured ? 80 : 16, gc_tick);
+        // bbport: critical used 160 ticks, longer than pressure's 80, so the aggressive pass
+        // never freed more than the first one (#256).
+        const u64 ticks_to_destroy = std::min<u64>(aggresive ? 40 : pressured ? 80 : 16, gc_tick);
         below_tick = gc_tick - ticks_to_destroy;
         if (!pressured && !aggresive) {
             below_tick = std::min(below_tick, idle_tick);
@@ -1242,13 +1247,15 @@ void TextureCache::GarbageCollectImages() {
         if (now - gc_report_time >= std::chrono::seconds(5)) {
             std::printf("Texture cache: memory pressure, %llu of %llu MiB (critical %llu): "
                         "%llu images evicted, %llu written back since the last report; "
-                        "%llu old GPU-written tiled images kept (%llu MiB), %llu dropped\n",
+                        "%llu old GPU-written tiled images kept (%llu MiB), %llu dropped "
+                        "(registered images: %llu MiB guest size)\n",
                         (unsigned long long)(total_used_memory >> 20),
                         (unsigned long long)(pressure_gc_memory >> 20),
                         (unsigned long long)(critical_gc_memory >> 20),
                         (unsigned long long)gc_evictions, (unsigned long long)gc_downloads,
                         (unsigned long long)gc_kept, (unsigned long long)(gc_kept_bytes >> 20),
-                        (unsigned long long)gc_dropped);
+                        (unsigned long long)gc_dropped,
+                        (unsigned long long)(registered_image_bytes >> 20));
             gc_report_time = now;
             gc_evictions = gc_downloads = gc_dropped = 0;
         }
