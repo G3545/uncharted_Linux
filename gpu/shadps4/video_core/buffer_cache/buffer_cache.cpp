@@ -134,6 +134,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         FindMemoryType(instance.GetMemoryProperties(), vk::MemoryPropertyFlagBits::eDeviceLocal,
                        reqs.memoryTypeBits)
             .value();
+    arena_memory_type_bits = reqs.memoryTypeBits;
 
     const u64 bda_pagetable_size =
         (blocks_per_arena_page * num_arena_pages) * sizeof(vk::DeviceAddress);
@@ -1010,11 +1011,36 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     }
     BbStats::Timer timer{BbStats::t_resident};
 
-    const vk::MemoryAllocateInfo alloc_info = {
+    vk::MemoryAllocateInfo alloc_info = {
         .allocationSize = resident_blocks << block_shift,
         .memoryTypeIndex = arena_memory_type_index,
     };
-    const auto device_memory = Vulkan::Check(instance.GetDevice().allocateMemory(alloc_info));
+    auto [alloc_result, device_memory] = instance.GetDevice().allocateMemory(alloc_info);
+    if (alloc_result == vk::Result::eErrorOutOfDeviceMemory) {
+        // bbport: VRAM full. The guest memory the GPU uses is backed here and only grows as areas
+        // load; on 4-8 GB cards it ran out ("ErrorOutOfDeviceMemory" stopped the game). Another
+        // memory type the arena accepts, outside VRAM (system memory the GPU reaches), is slower
+        // but keeps the game going.
+        const auto& props = instance.GetMemoryProperties();
+        const u32 vram_heap = props.memoryTypes[arena_memory_type_index].heapIndex;
+        for (u32 i = 0; i < props.memoryTypeCount && alloc_result != vk::Result::eSuccess; ++i) {
+            if (((arena_memory_type_bits >> i) & 1) == 0 || props.memoryTypes[i].heapIndex == vram_heap) {
+                continue;
+            }
+            alloc_info.memoryTypeIndex = i;
+            std::tie(alloc_result, device_memory) = instance.GetDevice().allocateMemory(alloc_info);
+        }
+        if (alloc_result == vk::Result::eSuccess) {
+            Vulkan::NoteOverBudget("buffer");
+        } else {
+            std::printf("GPU: video memory full: no room for %llu MiB of game memory (only VRAM "
+                        "can hold it on this GPU). A lower output resolution or upscaler preset "
+                        "needs less.\n",
+                        static_cast<unsigned long long>(alloc_info.allocationSize >> 20));
+            std::fflush(stdout);
+        }
+    }
+    device_memory = Vulkan::Check(vk::ResultValue<vk::DeviceMemory>{alloc_result, device_memory});
     static const bool arena_log = [] {
         const char* env = std::getenv("BB_ARENA_LOG");
         return env && env[0] == '1';
@@ -1362,8 +1388,9 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     if (sparse_idle) {
         // Called inside Scheduler::SubmitExecution (queue lock held), so the queue is ours.
         (void)instance.GetGraphicsQueue().waitIdle();
+        (void)instance.GetSparseQueue().waitIdle();
     }
-    auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
+    auto submit_result = instance.GetSparseQueue().bindSparse(sparse_info);
     if (submit_result == vk::Result::eErrorDeviceLost) {
         std::printf("Device lost during a sparse bind\n");
         Vulkan::DeviceLost(instance.GetDevice());
