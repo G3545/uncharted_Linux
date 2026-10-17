@@ -3,9 +3,19 @@
 name: Build Linux package
 
 on:
+  # A push or pull request that only touches these (README edits, notes, the sync workflow)
+  # changes nothing in the package, so it is not built or released.
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/sync-upstream.yml'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/sync-upstream.yml'
   workflow_dispatch:
   # sync-upstream.yml builds a merge of upstream before it reaches main (no release then).
   workflow_call:
