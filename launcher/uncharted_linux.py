@@ -1124,8 +1124,9 @@ def launcher_class(base, ns):
                 else:
                     note.configure(text=_('{} is not in the game folder').format(exe))
 
-        def available(self, key):
-            """The game's executable is in the chosen folder (else a message says what is missing)."""
+        def can_start(self, key):
+            """The game's executable is in the chosen folder (else a message says what is missing).
+            Not `available`: since 0.3.6 the upstream launcher keeps a dict by that name."""
             self.collect()
             info = game_info(self.app['game_dir'])
             if not info:
@@ -1143,7 +1144,7 @@ def launcher_class(base, ns):
             return f'Uncharted {number}: {title}'
 
         def play_game(self, key):
-            if self.available(key):
+            if self.can_start(key):
                 self.var('start').set(key)
                 self.play()
 
@@ -1153,7 +1154,7 @@ def launcher_class(base, ns):
             super().play()
 
         def game_shortcut(self, key):
-            if not self.available(key):
+            if not self.can_start(key):
                 return
             try:
                 desktop_game_entry(ns['__file__'], key, self.game_name(key))
@@ -1202,7 +1203,7 @@ def launcher_class(base, ns):
         def add_game_to_steam(self, key):
             """This game in the Steam library (a non-Steam game started with the settings saved
             in this launcher), only when its executable is in the game folder."""
-            if not self.available(key):
+            if not self.can_start(key):
                 return
             import bbport_steam
             steam = steam_folder()
