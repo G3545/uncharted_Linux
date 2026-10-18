@@ -364,13 +364,14 @@ def apply_defaults(ns):
     """Linux settings the Windows launcher does not have: Steam Deck mode (on by default on
     SteamOS) and a 30 FPS frame rate."""
     ns['APP_DEFAULTS'].setdefault('steam_deck', steam_deck())
+    ns['APP_DEFAULTS'].setdefault('gpu_readbacks', '1')
     ns['version_tuple'] = version_key  # the launcher's update check compares with it
     for name in ('WINDOW_SIZES', 'ANTI_ALIASING'):
         ns[name][:] = [(value, text.replace("(the games' own)", '(Default)').replace("(the game's own)", '(Default)'))
                        for value, text in ns[name]]
     ns['FRAME_RATES'][:] = [(value, '60 FPS (Default)' if value == '60' else text) for value, text in ns['FRAME_RATES']]
     if not any(value == '30' for value, _text in ns['FRAME_RATES']):
-        ns['FRAME_RATES'].insert(0, ('30', '30 FPS (Steam Deck)'))
+        ns['FRAME_RATES'].insert(0, ('30', '30 FPS'))
     if not any(value == '1280x800' for value, _text in ns['WINDOW_SIZES']):
         ns['WINDOW_SIZES'].insert(1, ('1280x800', '1280 × 800 (Steam Deck)'))
 
@@ -387,21 +388,51 @@ def default_saves(settings, data_dir=None):
 
 # Steam Deck mode shows its values in these settings while it is on (deck_environment enforces
 # the locked ones at launch); turning it off restores what the player had.
-DECK_SETTINGS = {'frame_rate': '30', 'window_size': '1280x800', 'present_mode': 'Fifo', 'fullscreen': True,
+DECK_SETTINGS = {'frame_rate': '60', 'window_size': '1280x800', 'present_mode': 'Fifo', 'fullscreen': True,
                  'anti_aliasing': 'off', 'frame_generation': 'off'}
-DECK_LOCKED = ('frame_rate', 'window_size', 'present_mode', 'fullscreen')
+DECK_LOCKED = ('window_size', 'present_mode', 'fullscreen')
+DECK_FRAME_RATES = ('30', '60')
+# Choices the Deck's hardware cannot run (an RDNA 2 GPU, a 60 Hz screen): greyed out in Steam
+# Deck mode, and replaced by these settings' first Deck-safe value at launch.
+DECK_UNAVAILABLE = {'anti_aliasing': ('fsr4', 'fsr411', 'dlss'), 'frame_generation': ('dlss',),
+                    'frame_gen_multiplier': ('3', '4')}
+DECK_FALLBACK = {'anti_aliasing': 'off', 'frame_generation': 'off', 'frame_gen_multiplier': '2'}
+
+
+# BB_READBACKS: whether GPU-written data is copied back when the game's CPU code writes the same
+# memory. Off fixes floating NPCs and characters in walls for some players (upstream #33) but can
+# turn weapons into black cubes, so it stays an experiment.
+READBACK_MODES = [('1', 'Default (relaxed)'),
+                  ('0', 'Off (experimental: fewer floating NPCs, but weapons can turn black)'),
+                  ('2', 'Precise (slower)')]
+
+
+def deck_allows(key, value):
+    """The value can be chosen for this setting in Steam Deck mode."""
+    if key == 'frame_rate':
+        return value in DECK_FRAME_RATES
+    return value not in DECK_UNAVAILABLE.get(key, ())
 
 
 def deck_environment(settings, env):
-    """Steam Deck mode: what the Deck needs to hold 30 FPS. Applied before the player's own
-    Environment entries, which can override any of it."""
+    """Steam Deck mode: the Deck's screen and presentation, 30 or 60 FPS, and nothing its GPU
+    cannot run; also the GPU readback mode (Advanced). Applied before the player's own Environment
+    entries, which can override any of it."""
+    readbacks = str(settings.get('gpu_readbacks') or '1')
+    if readbacks in ('0', '2'):
+        env['BB_READBACKS'] = readbacks
     if not settings.get('steam_deck'):
         return
-    env['BB_VBLANK_HZ'] = '30'           # a steady 30 instead of an uneven 15-25
+    rate = str(settings.get('frame_rate') or '')
+    env['BB_VBLANK_HZ'] = rate if rate in DECK_FRAME_RATES else '60'  # the PS4's rate; 30 can be chosen
     env['BB_WINDOW_SIZE'] = '1280x800'   # the Deck's screen: no 1080p output pass to scale down
     env['BB_PRESENT_MODE'] = 'Fifo'      # gamescope paces FIFO best
     env['BB_FULLSCREEN'] = '1'
     env['BB_FRAME_STATS'] = '1'          # frame time breakdown in last_run.log (tuning the Deck)
+    for key, name in (('anti_aliasing', 'BB_UPSCALER'), ('frame_generation', 'BB_FRAME_GEN'),
+                      ('frame_gen_multiplier', 'BB_FRAME_GEN_MULTIPLIER')):
+        if not deck_allows(key, str(settings.get(key) or '')):
+            env[name] = DECK_FALLBACK[key]
 
 
 def rotate_logs(folder, keep=5):
@@ -706,19 +737,56 @@ def launcher_class(base, ns):
             self.steam_deck_changed(startup=True)
 
         def choice(self, parent, key, options, width=36):
-            box = super().choice(parent, key, options, width)
+            """The launcher's drop-down, with the choices the Steam Deck cannot run greyed out
+            (and not selectable) while Steam Deck mode is on."""
+            var = self.var(key)
+            values = [v for v, _t in options]
+            box = self.ttk.Combobox(parent, values=[_(t) for _v, t in options], state='readonly', width=width)
+            if var.get() not in values:
+                var.set(values[0])
             self.boxes = getattr(self, 'boxes', {})
             self.boxes[key] = box
+
+            def blocked(value):
+                return bool(self.var('steam_deck').get()) and not deck_allows(key, value)
+
+            def show(*_args):
+                box.current(values.index(var.get()) if var.get() in values else 0)
+
+            def picked(_event):
+                value = values[box.current()]
+                if blocked(value):
+                    show()  # not on the Deck: the choice stays as it was
+                else:
+                    var.set(value)
+
+            def grey():
+                # The list is refilled after postcommand runs, so its items are coloured afterwards.
+                try:
+                    listbox = f"{box.tk.call('ttk::combobox::PopdownWindow', box)}.f.l"
+                    for index, value in enumerate(values):
+                        if blocked(value):
+                            box.tk.call(listbox, 'itemconfigure', index, '-foreground', MUTED,
+                                        '-selectforeground', MUTED)
+                except Exception:  # only the colours: selection is refused in picked() anyway
+                    pass
+            box.configure(postcommand=lambda: box.after_idle(grey))
+            show()
+            box.bind('<<ComboboxSelected>>', picked)
+            var.trace_add('write', show)
             return box
 
         def steam_deck_changed(self, startup=False):
             """Steam Deck mode on: the affected settings switch to the Deck's values (the previous ones
-            are kept in deck_saved) and the enforced ones are locked. Off: the kept values come back."""
+            are kept in deck_saved), the enforced ones are locked, the frame rate is 30 or 60 and the
+            choices the Deck cannot run are greyed out. Off: the kept values come back."""
             on = bool(self.var('steam_deck').get())
             saved = self.app.get('deck_saved')
             if on and not isinstance(saved, dict):
                 self.app['deck_saved'] = {key: self.var(key).get() for key in DECK_SETTINGS}
                 for key, value in DECK_SETTINGS.items():
+                    if key == 'frame_rate' and self.var(key).get() in DECK_FRAME_RATES:
+                        continue  # 30 or 60 already: the player's choice stays
                     self.var(key).set(value)
             elif not on and isinstance(saved, dict):
                 for key, value in saved.items():
@@ -728,6 +796,12 @@ def launcher_class(base, ns):
             elif on and startup:
                 for key in DECK_LOCKED:  # what deck_environment will use anyway
                     self.var(key).set(DECK_SETTINGS[key])
+            if on:  # a value the Deck cannot run (set before, or in settings.json): its safe one
+                if not deck_allows('frame_rate', self.var('frame_rate').get()):
+                    self.var('frame_rate').set(DECK_SETTINGS['frame_rate'])
+                for key, value in DECK_FALLBACK.items():
+                    if key in ns['APP_DEFAULTS'] and not deck_allows(key, self.var(key).get()):
+                        self.var(key).set(value)
             for key in DECK_LOCKED:
                 box = getattr(self, 'boxes', {}).get(key)
                 if box is not None:
@@ -889,6 +963,9 @@ def launcher_class(base, ns):
             self.check(f, 'check_updates', _('Automatic updates'),
                        _('Look for a new version when the launcher or a game starts, and offer to install it.'))
             self.check(f, 'close_on_play', _('Close the launcher when the game starts'))
+            self.row(f, _('GPU readbacks'), self.choice(f, 'gpu_readbacks', READBACK_MODES, 60),
+                     _('Off is a test for floating NPCs and characters inside walls (upstream issue #33): it '
+                       'helped some players, but weapons can turn into black cubes. Default if unsure.'))
             extra = self.ttk.Entry(f, textvariable=self.var('extra_env'), width=60)
             self.row(f, _('Environment'), extra, _('Extra variables for the game, NAME=value separated by spaces.'))
             self.section(f, _('Log'))
@@ -1013,9 +1090,12 @@ def launcher_class(base, ns):
             self.page_inner[name] = f
             if name == 'display':
                 self.check(f, 'steam_deck', _('Steam Deck mode'),
-                           _('Sets 30 FPS, the Deck\'s 1280 × 800, FIFO and fullscreen, and turns off anti-aliasing '
-                             'and frame generation, for a steady frame rate on the Steam Deck. Turning it off '
-                             'brings back your previous settings. On by default on SteamOS.'))
+                           _('Sets the Deck\'s 1280 × 800, FIFO and fullscreen, turns off anti-aliasing and frame '
+                             'generation, and runs at 60 FPS (30 can be chosen). Options the Deck\'s hardware cannot '
+                             'run are greyed out. Turning it off brings back your previous settings and every '
+                             'option. On by default on SteamOS.\n'
+                             'Recommended: create a per-game profile limiting the Steam Deck\'s FPS to your '
+                             'selected FPS.'))
             return f
 
         def build_play(self):

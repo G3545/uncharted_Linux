@@ -31,6 +31,7 @@
 
 typedef struct {
     int used, type, channels, is_float, frames, sample_bytes, std_layout;
+    int surround; /* device has 6+ channels: the game is told it is surround and gets 8 channels */
     int fold_stereo; /* 8 channels folded to stereo here for a device with fewer channels */
     int32_t volume[8];
     SDL_AudioStream *stream;
@@ -116,12 +117,16 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t index, uint32_
     p->sample_bytes=p->is_float ? 4 : 2; p->frames=(int)length; p->std_layout=format>=6;
     for (int c=0;c<8;++c) p->volume[c]=VOLUME_0DB;
     if (sdl_audio()) {
-        /* The games are told the output is stereo (sceAudioOutGetPortState) and fill only the
-           front pair of 8-channel buffers. SDL's 7.1 to stereo downmix scales that pair by
-           about 0.3: on a stereo device everything played far too quietly. Fold here instead. */
+        /* With a device of fewer than 6 channels the games are told the output is stereo
+           (sceAudioOutGetPortState) and fill only the front pair of 8-channel buffers. SDL's
+           7.1 to stereo downmix scales that pair by about 0.3: on a stereo device everything
+           played far too quietly, so it is folded here instead. On a 5.1 or 7.1 device they
+           are told it is surround and SDL maps the 8 channels to the device. The device is
+           checked when the port opens: one connected later gets the same mix. */
         SDL_AudioSpec device={0};
-        p->fold_stereo = p->channels==8 &&
-            SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&device,NULL) && device.channels<8;
+        int have_device = SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&device,NULL);
+        p->surround = p->channels==8 && have_device && device.channels>=6 && !getenv("BB_AUDIO_STEREO");
+        p->fold_stereo = p->channels==8 && have_device && !p->surround;
         SDL_AudioSpec spec={p->is_float ? SDL_AUDIO_F32 : SDL_AUDIO_S16, p->fold_stereo ? 2 : p->channels, 48000};
         p->stream=SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&spec,NULL,NULL);
         if (p->stream) SDL_ResumeAudioStreamDevice(p->stream);
@@ -281,7 +286,7 @@ static ABI int32_t audio_state(int32_t handle, PortState *state) {
     switch (p->type) {
     case 2: case 3: state->output=0x40; state->channel=1; break;          /* headphone */
     case 4: state->output=0x04; state->channel=1; state->volume=127; break; /* pad speaker */
-    default: state->output=0x01; state->channel=(uint8_t)(p->channels>2 ? 2 : p->channels); break;
+    default: state->output=0x01; state->channel=(uint8_t)(p->surround ? 8 : p->channels>2 ? 2 : p->channels); break;
     }
     return 0;
 }
