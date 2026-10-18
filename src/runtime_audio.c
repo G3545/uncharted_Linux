@@ -117,9 +117,12 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t index, uint32_
     p->sample_bytes=p->is_float ? 4 : 2; p->frames=(int)length; p->std_layout=format>=6;
     for (int c=0;c<8;++c) p->volume[c]=VOLUME_0DB;
     if (sdl_audio()) {
-        /* The games are told the output is stereo (sceAudioOutGetPortState) and fill only the
-           front pair of 8-channel buffers. SDL's 7.1 to stereo downmix scales that pair by
-           about 0.3: on a stereo device everything played far too quietly. Fold here instead. */
+        /* With a device of fewer than 6 channels the games are told the output is stereo
+           (sceAudioOutGetPortState) and fill only the front pair of 8-channel buffers. SDL's
+           7.1 to stereo downmix scales that pair by about 0.3: on a stereo device everything
+           played far too quietly, so it is folded here instead. On a 5.1 or 7.1 device they
+           are told it is surround and SDL maps the 8 channels to the device. The device is
+           checked when the port opens: one connected later gets the same mix. */
         SDL_AudioSpec device={0};
         int have_device = SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&device,NULL);
         p->surround = p->channels==8 && have_device && device.channels>=6 && !getenv("BB_AUDIO_STEREO");
