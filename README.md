@@ -9,7 +9,7 @@
 <img width="700" height="500" alt="image" src="https://github.com/user-attachments/assets/361582f1-7221-4f99-9a67-1748343836ad" />
 
 
-⚠️Uncharted 1: Ingame, seems stable. Unconfirmed if fully playable
+✅Uncharted 1: Confirmed fully playable. You may encounter some visual glitches.
 
 ⚠️Uncharted 2: Ingame, some physics glitches. Unconfirmed if fully playable
 
