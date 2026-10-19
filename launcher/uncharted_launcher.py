@@ -35,6 +35,7 @@ DATA_DIR = Path(os.environ.get('BB_DATA_DIR', PORT_DIR))
 WINDOWS = sys.platform == 'win32'
 if not WINDOWS:
     import uncharted_linux  # Linux fork: the Linux counterparts of the Windows calls below
+    import uncharted_logs  # Linux fork: the launcher's log and bug reports
 CONFIG_DIR = (Path(os.environ.get('APPDATA', Path.home())) if WINDOWS else uncharted_linux.config_dir().parent) / 'uncharted-launcher'
 CONFIG_FILE = CONFIG_DIR / 'settings.json'
 NAME = 'Uncharted'
@@ -412,10 +413,10 @@ class Launcher:
             self.dpi *= uncharted_linux.font_scale(root)
         root.geometry(f'{self.px(1180)}x{self.px(860)}')
         root.minsize(self.px(1040), self.px(760))
-        if not WINDOWS:  # Linux fork: fit small screens (the Steam Deck's 1280x800); no taller than
-            # the sidebar needs (the Library and Advanced pages were mostly empty below; longer pages scroll)
+        if not WINDOWS:  # Linux fork: fit small screens (the Steam Deck's 1280x800); 740 tall, the
+            # size chosen on the Deck's desktop (longer pages scroll)
             width = min(self.px(1180), root.winfo_screenwidth())
-            height = min(self.px(540), root.winfo_screenheight() - 60)
+            height = min(self.px(740), root.winfo_screenheight() - 60)
             root.geometry(f'{width}x{height}')
             root.minsize(min(self.px(1040), width), min(self.px(500), height))
         self.set_icon()
@@ -1712,7 +1713,10 @@ def play_without_window(settings):
             text = raw.decode('utf-8', errors='replace')
             log.write(text)
             try:
-                sys.stdout.write(text)
+                # Linux fork: the terminal only (the launcher's own log would get a second copy)
+                console = sys.stdout if WINDOWS else uncharted_logs.console()
+                if console is not None:
+                    console.write(text)
             except (OSError, ValueError):
                 pass
         return process.wait()
@@ -1731,6 +1735,14 @@ def main():
     settings = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
     if not WINDOWS:  # Linux fork: an empty saves folder is <game folder>/Saves
         uncharted_linux.default_saves(settings, DATA_DIR)
+    if not WINDOWS and '--report' in args:
+        # Linux fork: a bug report without the window (the menu entry's Create bug report), for
+        # when the window does not work.
+        sys.exit(uncharted_linux.report_without_window(settings, DATA_DIR, PORT_DIR, VERSION))
+    if not WINDOWS:  # Linux fork: every start writes logs/launcher.log (uncharted_logs)
+        uncharted_logs.start_session(DATA_DIR, VERSION, settings, 'game from a shortcut' if '--play' in args else 'window')
+        if (PORT_DIR / 'AUTO_REPORT').is_file() and '--play' not in args:  # test builds
+            uncharted_logs.auto_report(lambda: uncharted_linux.report_without_window(settings, DATA_DIR, PORT_DIR, VERSION))
     play = settings['start']
     if '--play' in args:  # Linux fork: `--play u2` starts that game (one Steam entry per game)
         after = args[args.index('--play') + 1:]
@@ -1759,6 +1771,8 @@ def main():
     except (AttributeError, OSError):
         pass
     if not WINDOWS:  # the bundled Cinzel, for Tk through fontconfig
+        uncharted_logs.watch_window()  # a start that hangs is in the log too
+        uncharted_linux.add_report_action()
         from uncharted_fonts import font_path
         for name in ('Cinzel-Regular.ttf', 'Cinzel-SemiBold.ttf', 'Cinzel-Bold.ttf'):
             if font_path(name):
@@ -1766,7 +1780,11 @@ def main():
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     root = tk.Tk()
+    if not WINDOWS:  # Linux fork: dialogs in the launcher's log
+        messagebox = uncharted_logs.logged_dialogs(messagebox)
     (Launcher if WINDOWS else uncharted_linux.launcher_class(Launcher, globals()))(root, tk, ttk, filedialog, messagebox)
+    if not WINDOWS:
+        uncharted_linux.log_window(root)
     root.mainloop()
 
 
