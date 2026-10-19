@@ -20,7 +20,7 @@
 
 ⚠️ Investigating Issues: CachyOS
 
-## Appimage
+## Download
 1. Download **[Uncharted-x86_64.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage)**.
 2. Right-click it, open **Properties → Permissions** and tick **Is executable** (or
    **Allow executing file as program**).
