@@ -21,6 +21,13 @@ if [ "${1:-}" = --uninstall ]; then
 fi
 
 [ "$(uname -m)" = x86_64 ] || { echo 'Uncharted needs a 64-bit x86 PC.' >&2; exit 1; }
+# The AppImage needs glibc 2.38 or newer (see packaging/linux/AppRun).
+glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
+if [ -n "$glibc" ] && [ "$(printf '%s\n2.38\n' "$glibc" | sort -V | head -1)" != 2.38 ]; then
+    echo "Uncharted needs a newer Linux system (glibc 2.38 or later; this one has $glibc)." >&2
+    echo 'Ubuntu 24.04, Linux Mint 22, Debian 13, Fedora 39 and newer releases work.' >&2
+    exit 1
+fi
 command -v curl >/dev/null || { echo 'Install curl first.' >&2; exit 1; }
 
 echo 'Finding the latest release...'
@@ -44,6 +51,11 @@ Exec="$appimage"
 Icon=$icon
 Terminal=false
 Categories=Game;
+Actions=report;
+
+[Desktop Action report]
+Name=Create bug report
+Exec="$appimage" --report
 EOF
 chmod +x "$entry"
 if [ -d "$desktop" ]; then

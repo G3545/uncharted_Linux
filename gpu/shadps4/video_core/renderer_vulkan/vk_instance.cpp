@@ -450,6 +450,21 @@ bool Instance::CreateDevice() {
             break;
         }
     }
+    // bbport: RADV (Steam Deck) has no transfer-only family and one graphics queue, so there was
+    // no side queue. An async compute family copies as well. Used for the read backs of
+    // BB_GPU_MERGE=0 only (BufferCache::DownloadOnSideQueue); the merging default keeps the
+    // device as it was.
+    const char* merge_env = std::getenv("BB_GPU_MERGE");
+    const bool accurate_gpu_memory = merge_env && merge_env[0] == '0';
+    for (u32 i = 0; accurate_gpu_memory && side_queue_family_index == queue_family_index &&
+                    i < family_properties.size();
+         ++i) {
+        const auto flags = family_properties[i].queueFlags;
+        if (!(flags & vk::QueueFlagBits::eGraphics) && (flags & vk::QueueFlagBits::eCompute) &&
+            (flags & vk::QueueFlagBits::eTransfer) && family_properties[i].queueCount > 0) {
+            side_queue_family_index = i;
+        }
+    }
     const bool side_family = side_queue_family_index != queue_family_index;
     // Linux fork (from GOW3 PC #252): sparse binds need a queue of a family with sparse binding.
     // Newer RADV (Steam Deck) has it only on a family of its own, not on the graphics family.
