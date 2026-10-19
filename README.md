@@ -11,7 +11,7 @@
 
 ✅Uncharted 1: Confirmed fully playable. You may encounter some visual glitches.
 
-⚠️Uncharted 2: Ingame, some physics glitches. Unconfirmed if fully playable
+❌Uncharted 2: Playable up to Chapter 21. Not passable yet
 
 ❌Uncharted 3: Crashes often. Not yet fully playable
 
