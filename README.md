@@ -15,6 +15,11 @@
 
 ❌Uncharted 3: Crashes often. Not yet fully playable
 
+## Distributions tested
+✅ Confirmed Working: SteamOS 3.7, Fedora 44, Debian 13
+
+⚠️ Investigating Issues: CachyOS
+
 ## Install
 
 ```sh
