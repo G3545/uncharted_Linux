@@ -204,7 +204,7 @@ def main():
             build = 'source'
         print(f'Run: Uncharted Linux {build}, game {exe}, {os.uname().sysname} {os.uname().release}, '
               f'vblank {env.get("BB_VBLANK_HZ")} Hz, window {env.get("BB_WINDOW_SIZE", "-")}, '
-              f'extra {" ".join(k + "=" + env[k] for k in ("BB_NAN_GUARD", "BB_GUEST_MXCSR", "BB_PROBE", "BB_READBACKS", "BB_ASC_DRAIN") if env.get(k)) or "-"}')
+              f'extra {" ".join(k + "=" + env[k] for k in ("BB_NAN_GUARD", "BB_GUEST_MXCSR", "BB_PROBE", "BB_READBACKS", "BB_ASC_DRAIN", "BB_GPU_MERGE") if env.get(k)) or "-"}')
     # Linux fork, experiment: BB_U1_DIRECT=1 starts eboot.bin the way the collection menu starts
     # a game (arguments eboot.bin ispartofuccollection), to boot Uncharted 1 past the menu.
     if exe == EXECUTABLES['u1'] and env.get('BB_U1_DIRECT') == '1':
@@ -212,7 +212,16 @@ def main():
         out_root.mkdir(parents=True, exist_ok=True)
         guest_argv.write_text('/app0/eboot.bin\neboot.bin\nispartofuccollection\n', encoding='utf-8')
         print('Starting eboot.bin as part of the collection (BB_U1_DIRECT=1)')
+    # Uncharted 2 reads the results of GPU work (grenade explosions, vehicle damage, the convoy
+    # of chapter 21) from memory it also writes: merging leaves them on the GPU, so it runs with
+    # accurate GPU memory (BB_GPU_MERGE=0) unless the player chose otherwise.
+    player_merge = env.get('BB_GPU_MERGE')
     while True:
+        if player_merge is None:
+            if exe == EXECUTABLES['u2']:
+                env['BB_GPU_MERGE'] = '0'
+            else:
+                env.pop('BB_GPU_MERGE', None)
         game, file = locate(env, exe)
         if not game:
             fail('Set BB_GAME_DIR to the game folder (the one with eboot.bin).')
