@@ -30,7 +30,7 @@ CLOSED = '== Launcher closed'
 NOT_RESPONDING = '== Not responding'
 # The settings shown in a log's summary (the report has the whole settings file).
 SUMMARY_SETTINGS = ('steam_deck', 'frame_rate', 'window_size', 'present_mode', 'fullscreen', 'anti_aliasing',
-                    'frame_generation', 'gpu_readbacks', 'extra_env', 'check_updates')
+                    'frame_generation', 'extra_env', 'check_updates')
 
 _log = None
 _started = time.monotonic()

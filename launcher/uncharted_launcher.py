@@ -1453,7 +1453,7 @@ class Launcher:
     def check_update(self, manual=False):
         """Helper thread: asks GitHub for the newest release and offers it when it is newer."""
         try:
-            version, url, page = latest_release()
+            version, url, page, _notes = latest_release()
         except (OSError, ValueError, KeyError) as failure:
             if manual:
                 self.ui_calls.put(lambda error=failure: self.messagebox.showerror(
@@ -1659,7 +1659,7 @@ def version_tuple(text):
 
 
 def latest_release():
-    """(version, zip URL, page URL) of the newest GitHub release."""
+    """(version, zip URL, page URL, notes) of the newest GitHub release; notes is its text."""
     request = urllib.request.Request(RELEASES_API, headers={'Accept': 'application/vnd.github+json',
                                                             'User-Agent': 'uncharted-launcher'})
     with urllib.request.urlopen(request, timeout=15) as response:
@@ -1670,7 +1670,7 @@ def latest_release():
     url = next((asset['browser_download_url'] for asset in release.get('assets', [])
                 if (asset.get('name', '').lower().endswith('.zip') if WINDOWS  # Linux fork: the AppImage
                     else asset.get('name') == 'Uncharted-x86_64.AppImage')), None)
-    return version, url, release.get('html_url') or RELEASES_PAGE
+    return version, url, release.get('html_url') or RELEASES_PAGE, release.get('body') or ''
 
 
 def install_update(target, wait_pid):
@@ -1732,6 +1732,12 @@ def main():
         shutil.rmtree(UPDATE_DIR, ignore_errors=True)  # what a finished update left behind
     if not WINDOWS:
         uncharted_linux.apply_defaults(globals())
+        saved = load_json(CONFIG_FILE, {})
+        if uncharted_linux.deck_frame_rate_30(saved):  # Linux fork: Steam Deck mode at 30 FPS
+            try:
+                CONFIG_FILE.write_text(json.dumps(saved, indent=2) + '\n', encoding='utf-8')
+            except OSError:
+                pass
     settings = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
     if not WINDOWS:  # Linux fork: an empty saves folder is <game folder>/Saves
         uncharted_linux.default_saves(settings, DATA_DIR)
@@ -1782,6 +1788,7 @@ def main():
     root = tk.Tk()
     if not WINDOWS:  # Linux fork: dialogs in the launcher's log
         messagebox = uncharted_logs.logged_dialogs(messagebox)
+        uncharted_linux.plain_info_dialogs(root)
     (Launcher if WINDOWS else uncharted_linux.launcher_class(Launcher, globals()))(root, tk, ttk, filedialog, messagebox)
     if not WINDOWS:
         uncharted_linux.log_window(root)
