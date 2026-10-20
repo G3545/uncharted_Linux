@@ -9,16 +9,16 @@
 <img width="700" height="500" alt="image" src="https://github.com/user-attachments/assets/361582f1-7221-4f99-9a67-1748343836ad" />
 
 
-✅Uncharted 1: Confirmed fully playable. You may encounter some visual glitches.
+✅Uncharted 1: Confirmed fully playable with some visual glitches
 
-⚠️Uncharted 2: Some visual and physics glitches, unconfirmed if fully playable
+✅Uncharted 2: Confirmed fully playable with some visual glitches
 
-❌Uncharted 3: Crashes often. Not yet fully playable
+⚠️Uncharted 3: Unconfirmed if fully playable
 
 ## Distributions tested
-✅ Confirmed Working: SteamOS 3.7, Fedora 44, Debian 13
+✅ Confirmed Working: SteamOS 3.7, Fedora 44, Debian 13 CachyOS, Arch, openSUSE Tumbleweed, Ubuntu 24.04, Mint 22, Pop!OS 24.04
 
-⚠️ Investigating Issues: CachyOS
+❌ Not Supported: Ubuntu 22.04 and older, Linux Mint 21 and older, Debian 12 and older 
 
 ## Download
 1. Download **[Uncharted-x86_64.AppImage](https://github.com/spacepepperoni/uncharted_Linux/releases/latest/download/Uncharted-x86_64.AppImage)**.
