@@ -39,8 +39,10 @@ strip --strip-debug -o "$dest/bin/bb-probe" out/bb-probe
 strip --strip-debug -o "$dest/bin/bb-gpu-capabilities" out/bb-gpu-capabilities
 strip --strip-debug -o "$dest/bin/gpu/libbbgpu.so" out/gpu/libbbgpu.so
 # Libraries every desktop and SteamOS have, or that must match the graphics driver, stay out
-# (whole families: libX*, libdrm_*, libpulse*, ...).
-system='^(ld-linux|libc\.|libm\.|libdl\.|libpthread|librt\.|libresolv|libutil\.|libgcc_s|libstdc\+\+|libvulkan|libX|libxcb|libxkb|libwayland|libdrm|libGL|libEGL|libgbm|libva[.-]|libva-|libasound|libpulse|libpipewire|libdbus|libudev|libsystemd|libz\.|libzstd|libexpat|libelf|libLLVM|libffi|libcap\.|libgcrypt|libgpg-error|liblzma|libmount|libblkid|libglib|libgobject|libgio|libgmodule|libpcre2|libdecor|libxshmfence|libsensors|libfontconfig|libfreetype)'
+# (whole families: libX*, libdrm_*, libpulse*, ...). libva is bundled: the bundled ffmpeg (Debian 13)
+# needs libva 2.21+ (vaMapBuffer2) and Ubuntu 24.04 / Mint 22 / Pop!_OS 24.04 have 2.20, so no game
+# started there. The game decodes in software and never loads a VA driver.
+system='^(ld-linux|libc\.|libm\.|libdl\.|libpthread|librt\.|libresolv|libutil\.|libgcc_s|libstdc\+\+|libvulkan|libX|libxcb|libxkb|libwayland|libdrm|libGL|libEGL|libgbm|libasound|libpulse|libpipewire|libdbus|libudev|libsystemd|libz\.|libzstd|libexpat|libelf|libLLVM|libffi|libcap\.|libgcrypt|libgpg-error|liblzma|libmount|libblkid|libglib|libgobject|libgio|libgmodule|libpcre2|libdecor|libxshmfence|libsensors|libfontconfig|libfreetype)'
 ldd out/bb-probe out/gpu/libbbgpu.so out/bb-gpu-capabilities | awk '/=> \// {print $1, $3}' | sort -u |
     while read -r name path; do
         # Arch and SteamOS list the loader as /lib64/ld-linux-x86-64.so.2 => ...: match by file name.
@@ -50,7 +52,7 @@ ldd out/bb-probe out/gpu/libbbgpu.so out/bb-gpu-capabilities | awk '/=> \// {pri
         [[ $name == libbbgpu.so ]] && continue
         [[ $name =~ $system ]] || cp -L "$path" "$dest/bin/lib/$name"
     done
-cp scripts/prepare.py scripts/link_modules.py scripts/link_libc.py scripts/content_profile.py "$dest/scripts/"
+cp scripts/prepare.py scripts/link_modules.py scripts/link_libc.py scripts/content_profile.py scripts/render_720p.py "$dest/scripts/"
 cp run.py LICENSE "$dest/"
 cp launcher/uncharted.png "$dest/launcher/"
 cp README.md "$dest/README.md"

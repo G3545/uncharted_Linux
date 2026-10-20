@@ -237,6 +237,19 @@ def main():
                    '--app0', str(game), '--user', str(user_dir), '--timeout', env.get('BB_TIMEOUT', '0')]
         if guest_argv:
             command += ['--guest-argv', str(guest_argv)]
+        # Linux fork: BB_RENDER_720P=1 (Steam Deck mode) renders the game at 1280x720 through its
+        # own 720p video settings (scripts/render_720p.py). An executable whose settings are not
+        # found starts at its usual 1080p.
+        if env.get('BB_RENDER_720P') == '1':
+            patches = out / 'render-720p.bin'
+            script = ['--script'] if getattr(sys, 'frozen', False) else []
+            made = subprocess.run([sys.executable, *script, str(PORT / 'scripts' / 'render_720p.py'),
+                                   str(out / 'eboot.elf'), str(patches)],
+                                  stdin=subprocess.DEVNULL, creationflags=no_console()).returncode == 0
+            if made:
+                command += ['--patches', str(patches)]
+            else:
+                print('Render 720p: not available for this executable; rendering at 1080p')
         loadexec.unlink(missing_ok=True)
         # No stdin: an inherited pipe (shells such as Git Bash) cost the game its console output.
         code = subprocess.run([*command, *args], stdin=subprocess.DEVNULL, creationflags=no_console()).returncode

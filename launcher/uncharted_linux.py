@@ -439,7 +439,6 @@ def apply_defaults(ns):
     """Linux settings the Windows launcher does not have: Steam Deck mode (on by default on
     SteamOS) and a 30 FPS frame rate."""
     ns['APP_DEFAULTS'].setdefault('steam_deck', steam_deck())
-    ns['APP_DEFAULTS'].setdefault('gpu_readbacks', '1')
     ns['version_tuple'] = version_key  # the launcher's update check compares with it
     for name in ('WINDOW_SIZES', 'ANTI_ALIASING'):
         ns[name][:] = [(value, text.replace("(the games' own)", '(Default)').replace("(the game's own)", '(Default)'))
@@ -463,10 +462,10 @@ def default_saves(settings, data_dir=None):
 
 # Steam Deck mode shows its values in these settings while it is on (deck_environment enforces
 # the locked ones at launch); turning it off restores what the player had.
-DECK_SETTINGS = {'frame_rate': '60', 'window_size': '1280x800', 'present_mode': 'Fifo', 'fullscreen': True,
+DECK_SETTINGS = {'frame_rate': '30', 'window_size': '1280x800', 'present_mode': 'Fifo', 'fullscreen': True,
                  'anti_aliasing': 'off', 'frame_generation': 'off'}
 DECK_LOCKED = ('window_size', 'present_mode', 'fullscreen')
-DECK_FRAME_RATES = ('30', '60')
+DECK_FRAME_RATES = ('30', '60')  # 30 by default: the Deck does not hold 60 yet
 # Choices the Deck's hardware cannot run (an RDNA 2 GPU, a 60 Hz screen): greyed out in Steam
 # Deck mode, and replaced by these settings' first Deck-safe value at launch.
 DECK_UNAVAILABLE = {'anti_aliasing': ('fsr4', 'fsr411', 'dlss'), 'frame_generation': ('dlss',),
@@ -481,12 +480,21 @@ ROW_HINTS = {'Frame rate': None,
              'Frame generation': None, 'Multiplier': None, 'Mouse sensitivity': None}
 
 
-# BB_READBACKS: whether GPU-written data is copied back when the game's CPU code writes the same
-# memory. Off fixes floating NPCs and characters in walls for some players (upstream #33) but can
-# turn weapons into black cubes, so it stays an experiment.
-READBACK_MODES = [('1', 'Default (relaxed)'),
-                  ('0', 'Off (experimental: fewer floating NPCs, but weapons can turn black)'),
-                  ('2', 'Precise (slower)')]
+def unsaved_changes(saved, current):
+    """The settings whose value in the launcher differs from the saved one."""
+    return sorted(key for key in current if current[key] != saved.get(key))
+
+
+def deck_frame_rate_30(saved):
+    """Steam Deck mode's default became 30 FPS (it was 60, which the Deck does not hold yet): saved
+    settings from an older launcher switch to 30 once, even when the game starts from Steam without
+    the launcher window. 60 can be chosen again. Returns True when `saved` changed."""
+    if not saved or saved.get('deck_30fps'):
+        return False
+    saved['deck_30fps'] = True
+    if saved.get('steam_deck') and str(saved.get('frame_rate')) == '60':
+        saved['frame_rate'] = '30'
+    return True
 
 
 def deck_allows(key, value):
@@ -498,16 +506,15 @@ def deck_allows(key, value):
 
 def deck_environment(settings, env):
     """Steam Deck mode: the Deck's screen and presentation, 30 or 60 FPS, and nothing its GPU
-    cannot run; also the GPU readback mode (Advanced). Applied before the player's own Environment
-    entries, which can override any of it."""
-    readbacks = str(settings.get('gpu_readbacks') or '1')
-    if readbacks in ('0', '2'):
-        env['BB_READBACKS'] = readbacks
+    cannot run. Applied before the player's own Environment entries, which can override any of it.
+    The GPU readbacks choice was removed (Off made Uncharted 2's convoy unpassable, Precise hangs
+    Uncharted 2 at startup), so a gpu_readbacks value saved by an older launcher is ignored."""
     if not settings.get('steam_deck'):
         return
     rate = str(settings.get('frame_rate') or '')
-    env['BB_VBLANK_HZ'] = rate if rate in DECK_FRAME_RATES else '60'  # the PS4's rate; 30 can be chosen
+    env['BB_VBLANK_HZ'] = rate if rate in DECK_FRAME_RATES else DECK_SETTINGS['frame_rate']
     env['BB_WINDOW_SIZE'] = '1280x800'   # the Deck's screen: no 1080p output pass to scale down
+    env['BB_RENDER_720P'] = '1'          # all three games render at 1280x720 (scripts/render_720p.py)
     env['BB_PRESENT_MODE'] = 'Fifo'      # gamescope paces FIFO best
     env['BB_FULLSCREEN'] = '1'
     env['BB_FRAME_STATS'] = '1'          # frame time breakdown in last_run.log (tuning the Deck)
@@ -530,6 +537,16 @@ def rotate_logs(folder, keep=5):
                 pass
 
 
+def plain_info_dialogs(root):
+    """Tk's information dialogs ("You have the latest version" and the like) without their
+    lightbulb icon: the icon's image is emptied once Tk's dialog code is loaded, as loading it
+    creates the icon again."""
+    try:
+        root.tk.eval('auto_load ::tk::MessageBox; image create photo ::tk::icons::information')
+    except Exception:  # another Tk: the dialogs keep their icon
+        pass
+
+
 def update_in_background(latest_release, version_tuple, version, settings):
     """Games started from Steam (Gaming Mode) never open the launcher: the update check runs
     beside the game and the new AppImage is swapped in for the next start. Returns the thread."""
@@ -538,7 +555,7 @@ def update_in_background(latest_release, version_tuple, version, settings):
 
     def work():
         try:
-            newest, url, _page = latest_release()
+            newest, url, _page, _notes = latest_release()
             if url and version_tuple(newest) > version_tuple(version):
                 install_appimage(url, Path(os.environ['APPIMAGE']))
                 print(f'Update: version {newest} installed for the next start')
@@ -629,6 +646,23 @@ class Gamepads:
         return sorted(new)
 
 
+# The short list the Gaming Mode update prompt shows, written in the release text as a comment,
+# which GitHub does not display on the release page:
+#   <!-- Update notes:
+#   - Steam Deck performance improvements
+#   -->
+UPDATE_NOTES = re.compile(r'<!--\s*update notes:(.*?)-->', re.IGNORECASE | re.DOTALL)
+
+
+def update_highlights(notes, most=6):
+    """The release text's update notes as a list of lines (the leading - or * removed)."""
+    found = UPDATE_NOTES.search(notes or '')
+    if not found:
+        return []
+    lines = [line.strip().lstrip('-*').strip() for line in found.group(1).splitlines()]
+    return [line[:70] for line in lines if line][:most]
+
+
 def startup_update_prompt(settings, latest_release, version, port_dir):
     """Before a game started from Steam: if this fork has a newer release, a full-screen prompt
     (controller, touch, mouse or keyboard) asks Update or Cancel. Update downloads it with a progress
@@ -649,7 +683,7 @@ def startup_update_prompt(settings, latest_release, version, port_dir):
     release = found.get('release')
     if not release or not release[1] or version_key(release[0]) <= version_key(version):
         return 'none'
-    newest, url, _page = release
+    newest, url, _page, notes = release
     try:
         import tkinter as tk
         import tkinter.font  # noqa: F401 (tk.font.families)
@@ -671,6 +705,15 @@ def startup_update_prompt(settings, latest_release, version, port_dir):
     message = tk.Label(box, text=f'Version {newest} is ready to install.\nYou have version {version}.',
                        bg='#08090a', fg=text, font=mid, justify='center')
     message.pack(pady=(0, 34))
+    highlights = update_highlights(notes)
+    if highlights:
+        points = tk.Frame(box, bg='#08090a')
+        points.pack(pady=(0, 34))
+        for point in highlights:
+            row = tk.Frame(points, bg='#08090a')
+            row.pack(anchor='w', pady=3)
+            tk.Label(row, text='•', bg='#08090a', fg=gold, font=mid).pack(side='left', padx=(0, 12))
+            tk.Label(row, text=point, bg='#08090a', fg=text, font=mid).pack(side='left')
     buttons = tk.Frame(box, bg='#08090a')
     buttons.pack()
     state = {'choice': None, 'selected': 0, 'progress': None}
@@ -817,6 +860,53 @@ def launcher_class(base, ns):
                 self.root.bind_class('TCombobox', button, handler)
             self.var('steam_deck').trace_add('write', lambda *_a: self.steam_deck_changed())
             self.steam_deck_changed(startup=True)
+            self.build_save_button()
+
+        def build_save_button(self):
+            """Save changes, bottom right: dim until a setting changes, then gold until saved.
+            Settings were saved only by Play and by closing the window, so a change was lost when
+            Steam ended the launcher (Gaming Mode)."""
+            right = self.content.master
+            self.save_button = PillButton(self.tk, right, _('Save changes'), self.save_changes, ns['COLORS'],
+                                          self.px, self.font_button, 'primary', SURFACE, (20, 8))
+            self.save_button.canvas.place(relx=1.0, rely=1.0, anchor='se', x=-self.px(22), y=-self.px(18))
+            for var in list(self.vars.values()) + list((getattr(self, 'pad_vars', None) or {}).values()):
+                var.trace_add('write', lambda *_a: self.after_setting_change())
+            self.saved_settings = self.settings_now()
+            self.after_setting_change()
+
+        def var(self, key):
+            new = key not in self.vars
+            var = super().var(key)
+            if new and hasattr(self, 'saved_settings'):  # made after the button: watch it too
+                var.trace_add('write', lambda *_a: self.after_setting_change())
+            return var
+
+        def settings_now(self):
+            settings = self.current()
+            if getattr(self, 'pad_vars', None):
+                settings['pad_bindings'] = {a: v.get() for a, v in self.pad_vars.items()}
+            return settings
+
+        def after_setting_change(self):
+            if hasattr(self, 'saved_settings'):
+                changed = unsaved_changes(self.saved_settings, self.settings_now())
+                self.save_button.configure(state='normal' if changed else 'disabled')
+                self.tk.Misc.lift(self.save_button.canvas)  # Canvas.lift raises drawn items
+
+        def save_changes(self):
+            self.collect()
+            label, saved = self.version_label, _('Settings saved')
+            if label.cget('text') != saved:  # an update notice comes back afterwards
+                self.corner_before = label.cget('text'), label.cget('fg')
+            self.show_version(saved, GOLD)
+            self.root.after(2500, lambda: label.cget('text') == saved and self.show_version(*self.corner_before))
+
+        def collect(self):
+            super().collect()
+            if hasattr(self, 'saved_settings'):
+                self.saved_settings = self.settings_now()
+                self.after_setting_change()
 
         def choice(self, parent, key, options, width=36):
             """The launcher's drop-down, with the choices the Steam Deck cannot run greyed out
@@ -1045,9 +1135,6 @@ def launcher_class(base, ns):
             self.check(f, 'check_updates', _('Automatic updates'),
                        _('Look for a new version when the launcher or a game starts, and offer to install it.'))
             self.check(f, 'close_on_play', _('Close the launcher when the game starts'))
-            self.row(f, _('GPU readbacks'), self.choice(f, 'gpu_readbacks', READBACK_MODES, 60),
-                     _('Off is a test for floating NPCs and characters inside walls (upstream issue #33): it '
-                       'helped some players, but weapons can turn into black cubes. Default if unsure.'))
             extra = self.ttk.Entry(f, textvariable=self.var('extra_env'), width=60)
             self.row(f, _('Environment'), extra, _('Extra variables for the game, NAME=value separated by spaces.'))
             self.section(f, _('Logs and bug reports'))
